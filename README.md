@@ -22,7 +22,7 @@
 依赖仅 Python 标准库：
 
 ```bash
-python serv0定端口
+python serve.py
 ```
 
 启动后自动打开浏览器，控制台会打印本机与局域网访问地址。
