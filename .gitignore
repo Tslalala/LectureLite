@@ -1,0 +1,5 @@
+# Python 缓存
+__pycache__/
+
+# 运行时上传的分享文件目录
+shared/

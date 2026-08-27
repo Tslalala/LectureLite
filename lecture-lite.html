@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LectureLite — 文件 + 音频 + 操作时间轴</title>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+:root{
+  --bg:#FAFAF8; --surface:#FFFFFF; --surface2:#F4F4F1;
+  --line:#E7E7E3; --line2:#D4D4CF;
+  --fg:#1a1a1a; --dim:#6B6B67; --dim2:#969692;
+  --acc:#1a1a1a; --acc2:#3a3a3a;
+  --rec:#c4423a;
+}
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{ margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.65 -apple-system,"Inter","SF Pro Display","Segoe UI","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; }
+
+/* —— toolbar —— */
+header{ flex-shrink:0; display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 24px;
+  background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; }
+h1{ font-size:17px; margin:0 16px 0 0; white-space:nowrap; font-weight:600; letter-spacing:-.01em; }
+h1 small{ color:var(--dim2); font-weight:400; margin-left:8px; font-size:14px; letter-spacing:0; }
+
+button{ background:var(--surface); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 18px; cursor:pointer; font-size:15px; font-weight:500;
+  transition:background .15s,border-color .15s,color .15s; }
+button:hover:not(:disabled){ background:var(--surface2); border-color:var(--line2); }
+button:active:not(:disabled){ background:#ECECE8; }
+button:disabled{ opacity:.35; cursor:default; }
+button.primary{ background:var(--acc); border-color:var(--acc); color:#fff; }
+button.primary:hover:not(:disabled){ background:var(--acc2); border-color:var(--acc2); }
+button.primary:active:not(:disabled){ background:#0f0f0f; }
+
+/* mode toggle — 圆形, 选中时暗红 */
+#modeRec,#modePlay{ border-radius:999px; padding:8px 24px; font-size:15px; }
+#modeRec.primary,#modePlay.primary{ background:var(--rec); border-color:var(--rec); color:#fff; }
+#modeRec.primary:hover,#modePlay.primary:hover{ background:#a83a32; border-color:#a83a32; }
+#modeRec.primary:active,#modePlay.primary:active{ background:#8e2e28; }
+
+input[type=file]{ color:var(--dim); font-size:14px; max-width:260px; }
+input[type=file]::file-selector-button{ background:var(--surface); border:1px solid var(--line);
+  color:var(--fg); border-radius:6px; padding:6px 12px; cursor:pointer; margin-right:8px;
+  font-size:14px; font-weight:500; transition:background .15s,border-color .15s; }
+input[type=file]::file-selector-button:hover{ background:var(--surface2); border-color:var(--line2); }
+
+select{ background:var(--surface); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 12px; cursor:pointer; font-size:15px;
+  transition:border-color .15s; }
+select:hover:not(:disabled){ border-color:var(--line2); }
+
+label{ color:var(--dim); font-size:14px; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; }
+label input[type=checkbox]{ accent-color:var(--acc); }
+
+.src-group{ display:inline-flex; align-items:stretch; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.src-btn{ background:var(--surface); color:var(--dim); border:none; border-radius:0; padding:8px 16px;
+  cursor:pointer; font-size:14px; font-weight:500; transition:background .15s,color .15s; }
+.src-btn:not(:last-child){ border-right:1px solid var(--line); }
+.src-btn:hover{ background:var(--surface2); color:var(--fg); }
+.src-btn:active{ background:#ECECE8; }
+.src-btn.active{ background:var(--surface2); color:var(--fg); font-weight:600; }
+
+.share-link-wrap{ display:inline-flex; align-items:center; gap:6px; margin-left:8px; }
+.share-link-wrap input{ font-size:13px; color:var(--fg); background:var(--surface2);
+  border:1px solid var(--line); border-radius:8px; padding:6px 10px; width:320px;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+#copyLink,#copyLink2{ padding:6px 12px; font-size:13px; }
+
+#status{ color:var(--dim); font-size:14px; margin-left:auto; max-width:420px;
+  text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+.bar{ display:none; flex-wrap:wrap; gap:10px; align-items:center; width:100%;
+  padding-top:12px; margin-top:2px; border-top:1px solid var(--line); }
+.bar.on{ display:flex; }
+.hidden{ display:none !important; }
+
+/* —— stage: 撑满剩余高度 —— */
+main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; }
+#stage{ position:relative; width:960px; max-width:100%; flex:1; }
+#viewer{ width:100%; height:100%; overflow:auto; background:#fff;
+  border-radius:12px; position:relative; border:1px solid var(--line); }
+#viewer::-webkit-scrollbar{ width:10px; height:10px; }
+#viewer::-webkit-scrollbar-thumb{ background:rgba(0,0,0,.14); border-radius:5px;
+  border:2px solid transparent; background-clip:padding-box; }
+#viewer::-webkit-scrollbar-thumb:hover{ background:rgba(0,0,0,.22); }
+
+#doc{ position:relative; min-height:100%; }
+.md-content{ max-width:820px; margin:0 auto; padding:40px 48px 120px;
+  color:#1f1f1d; font-size:15.5px; line-height:1.75; }
+.md-content h1,.md-content h2,.md-content h3{ line-height:1.3; font-weight:600; letter-spacing:-.01em; }
+.md-content pre{ background:var(--surface2); border:1px solid var(--line);
+  border-radius:8px; padding:14px 16px; overflow-x:auto; font-size:13px; line-height:1.55; white-space:pre; }
+.md-content code{ font-family:ui-monospace,SFMono-Regular,"SF Mono",Consolas,monospace; }
+.md-content :not(pre)>code{ background:var(--surface2); padding:1px 5px; border-radius:4px; font-size:.9em; }
+.md-content table{ border-collapse:collapse; margin:16px 0; width:100%; font-size:13.5px; }
+.md-content th,.md-content td{ border:1px solid var(--line); padding:8px 12px; text-align:left; vertical-align:top; }
+.md-content th{ background:var(--surface2); font-weight:600; }
+.md-content blockquote{ border-left:2px solid var(--line2); margin:16px 0; padding:2px 0 2px 16px; color:var(--dim); }
+.md-content img{ max-width:100%; }
+.md-content a{ color:var(--fg); text-decoration:underline; text-underline-offset:2px; text-decoration-color:var(--line2); }
+
+.pdf-page{ position:relative; margin:0 auto 12px; }
+.pdf-page canvas{ display:block; }
+.pdf-page .textLayer{ position:absolute; inset:0; overflow:hidden; }
+.pdf-page .textLayer span{ color:transparent; }
+.sel-rect{ position:absolute; background:rgba(196,66,58,.18); border-radius:2px; }
+
+/* —— playback overlays —— */
+#cursor{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
+  background:#e8362f; border:2px solid #fff; pointer-events:none; z-index:9; display:none;
+  box-shadow:0 0 0 3px rgba(232,54,47,.25),0 0 12px rgba(232,54,47,.7); }
+.ripple{ position:absolute; width:32px; height:32px; margin:-16px 0 0 -16px; border-radius:50%;
+  border:2px solid #e8362f; pointer-events:none; z-index:8; animation:rip .5s ease-out forwards; }
+@keyframes rip{ from{ transform:scale(.3); opacity:.7; } to{ transform:scale(1.5); opacity:0; } }
+
+/* —— playback controls —— */
+#seek{ flex:1; min-width:160px; height:4px; accent-color:var(--acc); cursor:pointer; }
+#seek:disabled{ opacity:.35; cursor:default; }
+#time{ font-variant-numeric:tabular-nums; color:var(--dim); font-size:14px;
+  white-space:nowrap; min-width:72px; letter-spacing:.01em; }
+
+.rec-dot{ width:8px; height:8px; border-radius:50%; background:var(--rec);
+  display:inline-block; animation:blink 1.1s infinite; margin-right:7px; vertical-align:middle; }
+@keyframes blink{ 50%{ opacity:.2; } }
+
+/* —— help button + modal —— */
+#helpBtn{ margin-left:4px; width:32px; height:32px; padding:0; border-radius:50%;
+  font-size:15px; font-weight:600; line-height:1; display:inline-flex; align-items:center; justify-content:center; }
+#intro{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+  z-index:50; background:rgba(250,250,248,.82); }
+#intro.show{ display:flex; }
+#intro .card{ background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:36px 40px; max-width:560px; }
+#intro h2{ margin:0 0 10px; font-size:18px; font-weight:600; letter-spacing:-.01em; }
+#intro p{ margin:0 0 4px; }
+#intro ol{ margin:14px 0 18px; padding-left:20px; color:var(--dim); font-size:13px; line-height:1.7; }
+#intro li{ margin:6px 0; }
+#intro b{ color:var(--fg); font-weight:600; }
+#intro code{ background:var(--surface2); border:1px solid var(--line);
+  padding:1px 5px; border-radius:4px; font-size:12px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LectureLite <small>文件 + 音频 + 操作时间轴</small></h1>
+  <button id="modeRec" class="primary">录制</button>
+  <button id="modePlay">播放</button>
+  <button id="helpBtn" title="帮助">?</button>
+  <span id="status"></span>
+  <div class="bar on" id="recBar">
+    <span class="src-group">
+      <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,image/*" multiple style="display:none">
+      <input type="file" id="srcDir" webkitdirectory style="display:none">
+      <button id="srcFileBtn" class="src-btn">选择文件</button>
+      <button id="srcDirBtn" class="src-btn">选择文件夹</button>
+    </span>
+    <label><input type="checkbox" id="embedSrc" checked>打包源文件</label>
+    <button id="btnStart" class="primary" disabled>开始录制</button>
+    <button id="btnStop" disabled>停止</button>
+    <button id="btnExport" disabled>导出</button>
+    <button id="btnShare" disabled>分享</button>
+    <span id="recTimer" style="color:var(--dim);font-size:12px"></span>
+    <span id="shareLinkWrap" class="share-link-wrap hidden">
+      <input type="text" id="shareLink" readonly>
+      <button id="copyLink">复制</button>
+    </span>
+  </div>
+  <div class="bar" id="playBar">
+    <input type="file" id="zipPick" accept=".zip">
+    <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,image/*" multiple class="hidden">
+    <button id="btnPlay" disabled>播放</button>
+    <button id="btnSharePlay" disabled>分享</button>
+    <input type="range" id="seek" min="0" max="1000" step="1" value="0" disabled>
+    <span id="time">–:––</span>
+    <select id="rate" disabled>
+      <option value="0.75">0.75×</option><option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+    </select>
+    <span id="shareLinkWrap2" class="share-link-wrap hidden">
+      <input type="text" id="shareLink2" readonly>
+      <button id="copyLink2">复制</button>
+    </span>
+  </div>
+</header>
+<main>
+  <div id="stage">
+    <div id="viewer"><div id="doc"></div></div>
+    <div id="cursor"></div>
+  </div>
+</main>
+
+<div id="intro"><div class="card" onclick="event.stopPropagation()">
+  <h2>LectureLite</h2>
+  <p style="color:var(--dim);font-size:13px;margin:0 0 4px">源文件 + 你的声音 + 操作时间轴，不用录屏。</p>
+  <ol>
+    <li><b>录制</b>：选择 <code>.md</code> / <code>.pdf</code>，或用<b>选文件夹</b>导入含 <code>images/</code> 的 md 项目，点击 <b>开始录制</b>（允许麦克风），边讲边滚动、选词、点击，停止后导出 <code>lecture.zip</code>。</li>
+    <li><b>播放</b>：选择 <code>lecture.zip</code>，按 <b>播放</b>。页面随音频自动滚动，还原光标与点击，可拖动进度、变速。</li>
+    <li>zip 内容 = 源文件 + audio + lecture.json。20 分钟讲解约 15 MB。</li>
+  </ol>
+  <p style="color:var(--dim2);font-size:12px;margin:0 0 16px">建议使用 Chrome；打开本页需联网加载渲染库。</p>
+  <button class="primary" id="introOk">知道了</button>
+</div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const viewer = $('viewer'), doc = $('doc'), stage = $('stage');
+let selLayer = null;
+let contentEl = null;  // .md-content 或 .pdf-page 容器, 用于坐标归一化
+let mode = 'rec';
+let source = null;      // {name, blob, type:'md'|'pdf'}
+let recState = null;    // recording in progress / finished
+let play = null;        // playback state
+let pendingPlay = null;
+let lastLoadedZipBlob = null;  // 用于播放栏分享
+let lastLoadedZipName = '';
+let timerIv = null;
+
+const md = window.markdownit ? markdownit({ html:true, linkify:true, breaks:false }) : null;
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+function status(msg){ $('status').textContent = msg || ''; }
+function fmtTime(s){ s = Math.max(0, s|0); return (s/60|0) + ':' + String(s%60).padStart(2,'0'); }
+function throttle(fn, ms){ let last = 0; return function(a){ const n = performance.now(); if (n - last < ms) return; last = n; fn(a); }; }
+function upperBound(arr, t){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m].t <= t) lo = m + 1; else hi = m; } return lo; }
+function baseName(n){ return n.replace(/\.[^.]+$/, ''); }
+
+// 获取实际内容元素 (.md-content / .pdf-page), 用于跨屏幕坐标归一化
+function getContentRect(){
+  if (contentEl) return contentEl.getBoundingClientRect();
+  // fallback: 用 #doc
+  return doc.getBoundingClientRect();
+}
+
+/* ---------- selection <-> char offsets (root = #doc) ---------- */
+function rangeToOffsets(r){
+  const a = document.createRange(); a.selectNodeContents(doc); a.setEnd(r.startContainer, r.startOffset);
+  const s = a.toString().length;
+  const b = document.createRange(); b.selectNodeContents(doc); b.setEnd(r.endContainer, r.endOffset);
+  return [s, b.toString().length];
+}
+function offsetsToRange(a, b){
+  const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+  let pos = 0, sn = null, so = 0, en = null, eo = 0, node;
+  while ((node = walker.nextNode())){
+    const len = node.nodeValue.length;
+    if (!sn && pos + len >= a){ sn = node; so = a - pos; }
+    if (pos + len >= b){ en = node; eo = b - pos; break; }
+    pos += len;
+  }
+  if (!sn || !en) return null;
+  const r = document.createRange(); r.setStart(sn, so); r.setEnd(en, eo);
+  return r;
+}
+
+/* ---------- source rendering (identical layout in record & play) ---------- */
+async function renderSource(blob, name, imgFiles){
+  doc.innerHTML = '';
+  const type = /\.pdf$/i.test(name) ? 'pdf' : 'md';
+
+  // 建立图片路径→blobURL 映射, 处理 md 中的相对路径图片
+  const imgMap = {};
+  if (imgFiles && imgFiles.length){
+    for (const f of imgFiles){
+      const url = URL.createObjectURL(f);
+      // 1. 用完整相对路径 (如 "images/xxx.png") 做 key
+      const rel = f.webkitRelativePath || f.name;
+      // 取 webkitRelativePath 中从 md 同级开始的相对路径
+      // webkitRelativePath 格式: "文件夹名/images/xxx.png", 而 md 引用 "images/xxx.png"
+      // 所以取最后两级路径作为 key
+      const parts = rel.split('/');
+      // 尝试多种匹配 key: 完整路径、从 images/ 开始的路径、纯文件名
+      const fullPath = parts.join('/');                    // "Folder/images/xxx.png"
+      const fromLast2 = parts.slice(-2).join('/');         // "images/xxx.png" ← 最常见
+      const fromLast3 = parts.slice(-3).join('/');         // "a/images/xxx.png"
+      const base = parts[parts.length - 1];                // "xxx.png"
+      imgMap[fullPath.toLowerCase()] = url;
+      imgMap[fromLast2.toLowerCase()] = url;
+      imgMap[fromLast3.toLowerCase()] = url;
+      imgMap[base.toLowerCase()] = url;
+    }
+  }
+
+  if (type === 'md'){
+    if (!md){ status('markdown-it 未加载（需联网）'); return; }
+    const text = await blob.text();
+    // 预处理: 把 ![alt](path/img.png) 的路径提取, 用 imgMap 匹配替换成 blobURL
+    const processedText = text.replace(/(!\[([^\]]*)\]\()([^)]+)(\))/g, (m, prefix, alt, src, suffix) => {
+      if (/^(data:|https?:|blob:)/i.test(src)) return m;
+      const key = src.toLowerCase().replace(/^\.\//, '');
+      // 尝试: 完整路径 "images/xxx.png"、纯文件名 "xxx.png"
+      if (imgMap[key]) return prefix + imgMap[key] + suffix;
+      const base = src.split('/').pop().split('\\').pop().toLowerCase();
+      if (imgMap[base]) return prefix + imgMap[base] + suffix;
+      return m;
+    });
+    const div = document.createElement('div');
+    div.className = 'md-content';
+    div.innerHTML = md.render(processedText);
+    // 后处理: 对所有 img, 如果 src 还是相对路径且 imgMap 有匹配, 替换
+    div.querySelectorAll('img').forEach(imgEl => {
+      const rawSrc = imgEl.getAttribute('src');
+      if (/^(data:|https?:|blob:)/i.test(rawSrc)) return;
+      const key = rawSrc.toLowerCase().replace(/^\.\//, '');
+      if (imgMap[key]) { imgEl.src = imgMap[key]; return; }
+      const base = rawSrc.split('/').pop().split('\\').pop().toLowerCase();
+      if (imgMap[base]) imgEl.src = imgMap[base];
+    });
+    doc.appendChild(div);
+    contentEl = div;
+    source = { name, blob, type, text, imgFiles: imgFiles || [], imgMap };
+  } else {
+    if (!window.pdfjsLib){ status('pdf.js 未加载（需联网）'); return; }
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageW = 880;
+    for (let i = 1; i <= pdf.numPages; i++){
+      status('渲染 PDF ' + i + '/' + pdf.numPages + '…');
+      const page = await pdf.getPage(i);
+      const vp1 = page.getViewport({ scale: 1 });
+      const scale = pageW / vp1.width;
+      const vp = page.getViewport({ scale });
+      const wrap = document.createElement('div');
+      wrap.className = 'pdf-page';
+      wrap.style.width = Math.ceil(vp.width) + 'px';
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+      wrap.appendChild(canvas);
+      const tl = document.createElement('div');
+      tl.className = 'textLayer';
+      wrap.appendChild(tl);
+      doc.appendChild(wrap);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      try {
+        const tc = await page.getTextContent();
+        await page.renderTextLayer({ textContent: tc, container: tl, viewport: vp }).promise;
+      } catch (e) {}
+    }
+    source = { name, blob, type, pdf };
+    contentEl = doc.querySelector('.pdf-page') || doc;
+  }
+  selLayer = document.createElement('div');
+  selLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:5;';
+  doc.appendChild(selLayer);
+  viewer.scrollTop = 0;
+  if (mode === 'rec'){ $('btnStart').disabled = !source; }
+  status('已加载 ' + name + '（' + (blob.size/1024).toFixed(0) + ' KB' + (imgFiles && imgFiles.length ? '，' + imgFiles.length + ' 张图片' : '') + '）');
+}
+
+/* ---------- recording ---------- */
+function pickAudioMime(){
+  if (!window.MediaRecorder) return '';
+  const c = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+  for (const m of c) if (MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+function audioDuration(blob){
+  return new Promise(res => {
+    let done = false;
+    const a = new Audio(); a.preload = 'metadata';
+    const finish = v => { if (done) return; done = true; URL.revokeObjectURL(a.src); res(v); };
+    a.onloadedmetadata = () => finish(isFinite(a.duration) ? a.duration : 0);
+    a.onerror = () => finish(0);
+    a.src = URL.createObjectURL(blob);
+    setTimeout(() => finish(0), 3000);
+  });
+}
+
+$('srcFileBtn').addEventListener('click', () => $('srcPick').click());
+
+$('srcPick').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  if (recState && !recState.finished) stopRec();
+  recState = null;
+  $('btnExport').disabled = true;
+  $('srcFileBtn').classList.add('active'); $('srcDirBtn').classList.remove('active');
+  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name)) || files.find(f => !f.type.startsWith('image/'));
+  const imgFiles = files.filter(f => f.type.startsWith('image/'));
+  renderSource(mdFile, mdFile.name, imgFiles);
+});
+
+// 选文件夹时用 webRelativePath 保留目录结构
+$('srcDir').addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  if (recState && !recState.finished) stopRec();
+  recState = null;
+  $('btnExport').disabled = true;
+  $('srcDirBtn').classList.add('active'); $('srcFileBtn').classList.remove('active');
+  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name));
+  const imgFiles = files.filter(f => f.type.startsWith('image/'));
+  if (mdFile) {
+    renderSource(mdFile, mdFile.name, imgFiles);
+  } else {
+    status('文件夹中未找到 .md 文件');
+  }
+});
+
+$('srcDirBtn').addEventListener('click', () => $('srcDir').click());
+
+$('srcPick2').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (!files.length || !pendingPlay) return;
+  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name)) || files.find(f => !f.type.startsWith('image/'));
+  const imgFiles = files.filter(f => f.type.startsWith('image/'));
+  await renderSource(mdFile || files[0], pendingPlay.json.file.name, imgFiles);
+  startPlayback(pendingPlay);
+  pendingPlay = null;
+});
+
+async function startRec(){
+  if (!source || recState) return;
+  if (!window.MediaRecorder || !navigator.mediaDevices){ status('此浏览器不支持 MediaRecorder，请用 Chrome'); return; }
+  if (!md && source.type === 'md'){ status('markdown-it 未加载'); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (err){ status('麦克风不可用：' + err.message); return; }
+  const mime = pickAudioMime();
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined);
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  const states = [], cursor = [], clicks = [];
+  let lastKey = '', selKey = '';
+  const st0 = performance.now();
+  rec.start(1000);
+
+  const onMove = throttle(e => {
+    const cr = getContentRect();
+    // 存相对内容元素的比例 (0~1), 确保跨屏幕/缩放一致
+    const rx = cr.width > 0 ? (e.clientX - cr.left) / cr.width : 0;
+    const ry = cr.height > 0 ? (e.clientY - cr.top) / cr.height : 0;
+    cursor.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
+  }, 40);
+  const onDown = e => {
+    const cr = getContentRect();
+    const rx = cr.width > 0 ? (e.clientX - cr.left) / cr.width : 0;
+    const ry = cr.height > 0 ? (e.clientY - cr.top) / cr.height : 0;
+    clicks.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
+  };
+  function curSel(){
+    if (source.type !== 'md') return null;
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    const r = sel.getRangeAt(0);
+    if (!doc.contains(r.commonAncestorContainer)) return null;
+    const o = rangeToOffsets(r);
+    return o[1] > o[0] ? o : null;
+  }
+  function pushState(){
+    const maxScroll = viewer.scrollHeight - viewer.clientHeight;
+    const scrollRatio = maxScroll > 0 ? viewer.scrollTop / maxScroll : 0;
+    const s = curSel();
+    selKey = s ? s[0] + ',' + s[1] : '';
+    const key = Math.round(scrollRatio * 1000) + '|' + selKey;
+    if (key === lastKey) return;
+    lastKey = key;
+    states.push({ t: Math.round(performance.now() - st0), sr: Math.round(scrollRatio * 10000) / 10000, y: Math.round(viewer.scrollTop), s: s ? { a: s[0], b: s[1] } : null });
+  }
+  const onScroll = throttle(pushState, 80);
+  pushState();
+  viewer.addEventListener('scroll', onScroll);
+  viewer.addEventListener('pointermove', onMove);
+  viewer.addEventListener('pointerdown', onDown);
+  document.addEventListener('selectionchange', onScroll);
+  const iv = setInterval(pushState, 250);
+
+  recState = { rec, chunks, states, cursor, clicks, st0, stream, iv, onScroll, onMove, onDown, finished: false };
+  $('btnStart').disabled = true;
+  $('btnStop').disabled = false;
+  $('srcPick').disabled = true;
+  $('btnExport').disabled = true;
+  $('btnShare').disabled = true;
+  timerIv = setInterval(() => {
+    $('recTimer').innerHTML = '<span class="rec-dot"></span>' + fmtTime((performance.now() - recState.st0) / 1000);
+  }, 250);
+  status('录制中… 边讲边滚动 / 选中文字 / 点击即可');
+}
+$('btnStart').addEventListener('click', startRec);
+
+function stopRec(){
+  if (!recState || recState.finished) return;
+  const { rec, chunks, states, cursor, clicks, st0, stream, iv, onScroll, onMove, onDown } = recState;
+  clearInterval(iv);
+  clearInterval(timerIv);
+  viewer.removeEventListener('scroll', onScroll);
+  viewer.removeEventListener('pointermove', onMove);
+  viewer.removeEventListener('pointerdown', onDown);
+  document.removeEventListener('selectionchange', onScroll);
+  stream.getTracks().forEach(t => t.stop());
+
+  // 同步组装导出数据 —— 不依赖 onstop 异步回调,确保停止后立即可导出
+  const audioBlob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+  const json = {
+    v: 1, app: 'LectureLite', created: new Date().toISOString(),
+    duration: (performance.now() - st0) / 1000,
+    viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+    file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
+    states, cursor, clicks
+  };
+  recState = { audioBlob, json, finished: true };
+
+  $('btnStop').disabled = true;
+  $('btnStart').disabled = false;
+  $('srcPick').disabled = false;
+  $('btnExport').disabled = false;
+  $('btnShare').disabled = false;
+  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
+  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
+
+  // onstop 异步回调只负责用更精确的时长刷新一次(可选),失败也不影响导出
+  rec.onstop = async () => {
+    try {
+      const dur = await audioDuration(audioBlob);
+      if (dur && isFinite(dur)){
+        json.duration = Math.max(dur, json.duration);
+        $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
+        status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
+      }
+    } catch(e) {}
+  };
+  try { rec.stop(); } catch(e){}
+
+  // 若 3 秒内 onstop 仍未修正时长,用计时器兜底
+  setTimeout(() => { if (recState && recState.json){ audioDuration(audioBlob).then(d => { if (d && isFinite(d) && d > recState.json.duration){ recState.json.duration = d; } }); } }, 3500);
+}
+$('btnStop').addEventListener('click', stopRec);
+
+async function exportZip(){
+  if (!recState || !recState.finished) return;
+  const { audioBlob, json } = recState;
+  const zip = new JSZip();
+  if ($('embedSrc').checked){
+    zip.file(json.file.name, source.blob);
+    // 把图片也打进 zip, 保留相对路径结构
+    if (source.imgFiles){
+      for (const f of source.imgFiles){
+        zip.file(f.name, f);
+      }
+    }
+  }
+  const ty = audioBlob.type || 'audio/webm';
+  const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
+  zip.file('audio.' + ext, audioBlob);
+  zip.file('lecture.json', JSON.stringify(json));
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = baseName(json.file.name) + '.lecture.zip';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB）— 把这一个文件发给听众即可');
+}
+$('btnExport').addEventListener('click', exportZip);
+
+/* ---------- share ---------- */
+async function doShare(zipBlob, fileName, linkInputId, wrapId){
+  status('正在上传到分享服务器…');
+  try {
+    const fd = new FormData();
+    fd.append('file', new File([zipBlob], fileName, { type: 'application/zip' }));
+    const res = await fetch('/share', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('服务器返回 ' + res.status);
+    const data = await res.json();
+    $(linkInputId).value = data.url;
+    $(wrapId).classList.remove('hidden');
+    status('分享链接已生成，复制发给同事即可');
+    return data.url;
+  } catch (err){
+    $(linkInputId).value = '';
+    status('分享失败: ' + err.message + ' — 请确认 serve.py 正在运行');
+    return null;
+  }
+}
+
+$('btnShare').addEventListener('click', async () => {
+  if (!recState || !recState.finished) return;
+  const { audioBlob, json } = recState;
+  status('正在打包并上传…');
+  const zip = new JSZip();
+  if ($('embedSrc').checked){
+    zip.file(json.file.name, source.blob);
+    if (source.imgFiles){ for (const f of source.imgFiles) zip.file(f.name, f); }
+  }
+  const ty = audioBlob.type || 'audio/webm';
+  const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
+  zip.file('audio.' + ext, audioBlob);
+  zip.file('lecture.json', JSON.stringify(json));
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  doShare(zipBlob, baseName(json.file.name) + '.lecture.zip', 'shareLink', 'shareLinkWrap');
+});
+
+$('copyLink').addEventListener('click', () => {
+  $('shareLink').select(); document.execCommand('copy');
+  status('已复制到剪贴板');
+});
+$('copyLink2').addEventListener('click', () => {
+  $('shareLink2').select(); document.execCommand('copy');
+  status('已复制到剪贴板');
+});
+
+/* ---------- playback ---------- */
+async function loadZip(file){
+  lastLoadedZipBlob = file;
+  lastLoadedZipName = file.name;
+  try {
+    const zip = await JSZip.loadAsync(file);
+    let json = null, audioEntry = null, srcEntry = null;
+    const imgEntries = [];
+    for (const name in zip.files){
+      const e = zip.files[name];
+      if (e.dir) continue;
+      if (/\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(name)) audioEntry = e;
+      else if (name.endsWith('.json')) json = JSON.parse(await e.async('string'));
+      else if (/\.(png|jpe?g|gif|svg|bmp|webp|avif)$/i.test(name)) imgEntries.push(e);
+      else srcEntry = e;
+    }
+    if (!json) throw new Error('zip 里找不到 .json 时间轴');
+    if (!audioEntry) throw new Error('zip 里找不到音频文件');
+    const audioBlob = await audioEntry.async('blob');
+    const name = json.file && json.file.name ? json.file.name : srcEntry ? srcEntry.name : 'source';
+    if (play && play.audio){ play.active = false; play.audio.pause(); }
+    play = null;
+    $('btnPlay').disabled = true; $('btnPlay').textContent = '▶ 播放';
+    $('seek').disabled = true; $('rate').disabled = true; $('seek').value = 0;
+    $('time').textContent = '–:––';
+    $('cursor').style.display = 'none';
+    $('srcPick2').classList.add('hidden');
+    if (srcEntry){
+      const srcBlob = await srcEntry.async('blob');
+      // 从 zip 中恢复图片为 File 对象数组
+      const imgFiles = [];
+      for (const ie of imgEntries){
+        const ib = await ie.async('blob');
+        imgFiles.push(new File([ib], ie.name, { type: ib.type || 'image/png' }));
+      }
+      await renderSource(srcBlob, name, imgFiles);
+      startPlayback({ json, audioBlob });
+      $('btnSharePlay').disabled = false;
+    } else {
+      status('该 zip 未包含源文件 — 请手动选择源文件（' + name + '）：');
+      pendingPlay = { json, audioBlob };
+      $('srcPick2').classList.remove('hidden');
+    }
+  } catch (err){ status('加载失败：' + err.message); }
+}
+$('zipPick').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadZip(f);
+});
+
+$('btnSharePlay').addEventListener('click', () => {
+  if (!lastLoadedZipBlob) { status('没有可分享的文件'); return; }
+  doShare(lastLoadedZipBlob, lastLoadedZipName, 'shareLink2', 'shareLinkWrap2');
+});
+function startPlayback({ json, audioBlob }){
+  const audio = new Audio();
+  audio.src = URL.createObjectURL(audioBlob);
+  audio.playbackRate = parseFloat($('rate').value);
+  play = {
+    audio,
+    states: json.states || [],
+    cursor: json.cursor || [],
+    clicks: json.clicks || [],
+    clickIdx: 0, lastKey: '',
+    meta: json.viewport || { w: viewer.clientWidth, h: viewer.clientHeight },
+    dur: json.duration || 0, active: false
+  };
+  audio.addEventListener('loadedmetadata', () => {
+    const dur = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (json.duration || 0);
+    $('seek').max = Math.max(1, Math.round(dur * 100));
+    $('seek').disabled = false; $('rate').disabled = false;
+    $('time').textContent = '0:00 / ' + fmtTime(dur);
+  });
+  audio.addEventListener('ended', () => { play.active = false; $('btnPlay').textContent = '▶ 重播'; });
+  $('btnPlay').disabled = false;
+  const initDur = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (json.duration || 0);
+  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样 → 按 ▶ 播放');
+}
+$('btnPlay').addEventListener('click', () => {
+  if (!play) return;
+  if (play.active){
+    play.audio.pause(); play.active = false; $('btnPlay').textContent = '▶ 播放';
+  } else {
+    play.audio.play().then(() => { play.active = true; $('btnPlay').textContent = '⏸ 暂停'; })
+      .catch(err => status('播放失败：' + err.message));
+  }
+});
+$('seek').addEventListener('input', e => {
+  if (!play) return;
+  play.audio.currentTime = e.target.value / 100;
+  const t = play.audio.currentTime * 1000;
+  play.clickIdx = 0;
+  for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= t) play.clickIdx++; }
+  play.lastKey = '';
+});
+$('rate').addEventListener('change', e => { if (play) play.audio.playbackRate = parseFloat(e.target.value); });
+
+function applyState(t){
+  const st = play.states;
+  if (!st.length) return;
+  let i = upperBound(st, t) - 1;
+  if (i < 0) i = 0;
+  const s = st[i];
+  const key = (s.sr !== undefined ? Math.round(s.sr * 1000) : s.y) + '|' + (s.s ? s.s.a + ',' + s.s.b : '');
+  if (key === play.lastKey) return;
+  play.lastKey = key;
+  // 优先使用比例 sr, 兼容旧数据的绝对像素 y
+  if (s.sr !== undefined){
+    const maxScroll = viewer.scrollHeight - viewer.clientHeight;
+    viewer.scrollTop = s.sr * maxScroll;
+  } else {
+    viewer.scrollTop = s.y;
+  }
+  if (selLayer){
+    selLayer.innerHTML = '';
+    if (s.s && source && source.type === 'md'){
+      const r = offsetsToRange(s.s.a, s.s.b);
+      if (r){
+        const docR = doc.getBoundingClientRect();
+        for (const rc of r.getClientRects()){
+          const d = document.createElement('div');
+          d.className = 'sel-rect';
+          d.style.left = (rc.left - docR.left) + 'px';
+          d.style.top = (rc.top - docR.top) + 'px';
+          d.style.width = rc.width + 'px';
+          d.style.height = rc.height + 'px';
+          selLayer.appendChild(d);
+        }
+      }
+    }
+  }
+}
+function applyCursor(t){
+  const cs = play.cursor;
+  if (!cs.length){ $('cursor').style.display = 'none'; return; }
+  const el = $('cursor');
+  el.style.display = 'block';
+  let i = upperBound(cs, t) - 1;
+  if (i < 0) i = 0;
+  const p = cs[i];
+  // p.x/y 是相对内容元素的比例 (0~1), 乘以当前内容尺寸得到像素, 再转到 #stage 坐标系
+  const cr = getContentRect();
+  const sr = stage.getBoundingClientRect();
+  el.style.left = (p.x * cr.width + cr.left - sr.left) + 'px';
+  el.style.top = (p.y * cr.height + cr.top - sr.top) + 'px';
+}
+function runClicks(t){
+  const clicks = play.clicks;
+  const cr = getContentRect();
+  const sr = stage.getBoundingClientRect();
+  while (play.clickIdx < clicks.length && clicks[play.clickIdx].t <= t){
+    const c = clicks[play.clickIdx++];
+    const d = document.createElement('div');
+    d.className = 'ripple';
+    d.style.left = (c.x * cr.width + cr.left - sr.left) + 'px';
+    d.style.top = (c.y * cr.height + cr.top - sr.top) + 'px';
+    stage.appendChild(d);
+    setTimeout(() => d.remove(), 650);
+  }
+}
+function tick(){
+  if (play && play.active){
+    const t = play.audio.currentTime * 1000;
+    applyState(t); applyCursor(t); runClicks(t);
+    const smax = parseFloat($('seek').max) || 1;
+    $('seek').value = Math.min(Math.round(t / 10), smax);
+    const dur = play.dur || 0;
+    $('time').textContent = fmtTime(play.audio.currentTime) + ' / ' + fmtTime(dur);
+  }
+  requestAnimationFrame(tick);
+}
+window.addEventListener('resize', () => { if (play) play.lastKey = ''; });
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && play && mode === 'play' && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){
+    e.preventDefault();
+    $('btnPlay').click();
+  }
+});
+
+/* ---------- mode ---------- */
+function setMode(m){
+  mode = m;
+  $('recBar').classList.toggle('on', m === 'rec');
+  $('playBar').classList.toggle('on', m === 'play');
+  $('modeRec').classList.toggle('primary', m === 'rec');
+  $('modePlay').classList.toggle('primary', m === 'play');
+}
+$('modeRec').addEventListener('click', () => setMode('rec'));
+$('modePlay').addEventListener('click', () => setMode('play'));
+function showHelp(){ $('intro').classList.add('show'); }
+function hideHelp(){ $('intro').classList.remove('show'); }
+$('helpBtn').addEventListener('click', showHelp);
+$('introOk').addEventListener('click', hideHelp);
+$('intro').addEventListener('click', hideHelp); // 点遮罩关闭
+
+// 从 URL 参数自动加载 zip (局域网分享)
+(function(){
+  const params = new URLSearchParams(location.search);
+  const src = params.get('src');
+  if (!src) return;
+  const srcDecoded = decodeURIComponent(src);
+  // 切换模式 + 加载
+  setMode('play');
+  status('正在加载分享文件: ' + srcDecoded + ' …');
+  fetch(srcDecoded)
+    .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); })
+    .then(blob => {
+      const f = new File([blob], srcDecoded, { type: 'application/zip' });
+      loadZip(f);
+    })
+    .catch(err => status('加载分享文件失败: ' + err.message + ' — 可手动选择 zip 文件'));
+})();
+
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
