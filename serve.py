@@ -1,21 +1,10 @@
 #!/usr/bin/env python3
-"""LectureLite 局域网服务 — 一键启动,自动打开浏览器
-
-用法:
-  python serve.py              # 默认 8000 端口
-  python serve.py 9000         # 指定端口
-
-功能:
-  1. 启动 HTTP 服务并自动打开浏览器
-  2. 前端点「分享」时,POST /share 上传 zip,返回局域网分享链接
-  3. 同事打开链接自动播放,无需安装
-"""
 
 import sys, os, json, uuid, socket, webbrowser, urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-PORT = 8000
+PORT = 8663
 WEB_DIR = Path(__file__).parent.resolve()
 SHARED_DIR = WEB_DIR / "shared"
 
