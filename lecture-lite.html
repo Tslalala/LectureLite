@@ -81,9 +81,56 @@ label input[type=checkbox]{ accent-color:var(--acc); }
 
 /* —— stage: 撑满剩余高度 —— */
 main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; }
-#stage{ position:relative; width:960px; max-width:100%; flex:1; }
-#viewer{ width:100%; height:100%; overflow:auto; background:#fff;
-  border-radius:12px; position:relative; border:1px solid var(--line); }
+#stage{ position:relative; width:960px; max-width:100%; flex:1;
+  display:flex; flex-direction:column; min-height:0; }
+
+/* —— 工作区 tab 栏（类似浏览器）—— */
+#tabbar{ flex-shrink:0; display:flex; align-items:center; gap:6px;
+  background:var(--surface); border-bottom:1px solid var(--line);
+  padding:6px 8px; border-radius:10px 10px 0 0; overflow-x:auto;
+  border:1px solid var(--line); border-bottom:none; }
+#tabbar::-webkit-scrollbar{ height:4px; }
+#tabs{ display:flex; align-items:center; gap:4px; height:30px; }
+.tab{ display:inline-flex; align-items:center; gap:6px;
+  background:var(--surface2); border:1px solid var(--line);
+  border-radius:7px; padding:0 8px 0 12px; height:28px; cursor:pointer;
+  font-size:12.5px; color:var(--dim); white-space:nowrap; max-width:180px;
+  transition:background .15s; }
+.tab .tab-name{ overflow:hidden; text-overflow:ellipsis; }
+.tab:hover{ background:#ECECE8; }
+.tab.active{ background:#fff; color:var(--fg); border-color:var(--line2); font-weight:600; }
+.tab .tab-close{ display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:50%; font-size:13px; line-height:1;
+  color:var(--dim); }
+.tab .tab-close:hover{ background:rgba(0,0,0,.1); color:var(--fg); }
+#tabAdd{ display:inline-flex; align-items:center; justify-content:center;
+  width:28px; height:28px; border-radius:7px; font-size:18px; font-weight:500;
+  color:var(--dim); cursor:pointer; flex-shrink:0; }
+#tabAdd:hover{ background:var(--surface2); color:var(--fg); }
+#tabbar{ padding-right:4px; }
+
+/* —— 工作区主体：目录 + 文档 —— */
+#workarea{ flex:1; display:flex; min-height:0; }
+#toc{ flex-shrink:0; width:200px; overflow:auto; background:var(--surface2);
+  border-right:1px solid var(--line); padding:14px 12px; font-size:13px;
+  border:1px solid var(--line); border-top:none; border-right-width:0; }
+#toc-title{ font-size:12px; color:var(--dim2); font-weight:600; letter-spacing:.05em;
+  margin:0 0 10px; text-transform:uppercase; }
+#toc .toc-item{ display:block; padding:4px 6px; color:var(--dim); cursor:pointer;
+  line-height:1.5; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#toc .toc-item:hover{ background:rgba(0,0,0,.06); color:var(--fg); }
+#toc .toc-item.h1{ font-weight:600; color:var(--fg); }
+#toc .toc-item.h2{ padding-left:16px; }
+#toc .toc-item.h3{ padding-left:30px; font-size:12.5px; }
+#toc .toc-item.active{ background:rgba(0,0,0,.1); color:var(--acc); }
+#toc .toc-page{ display:block; padding:4px 6px; color:var(--dim); cursor:pointer;
+  line-height:1.5; border-radius:4px; }
+#toc .toc-page:hover{ background:rgba(0,0,0,.06); color:var(--fg); }
+#toc .toc-page.active{ background:rgba(0,0,0,.1); color:var(--acc); }
+
+#viewer{ flex:1; overflow:auto; background:#fff;
+  border-radius:0 0 12px 0; position:relative;
+  border:1px solid var(--line); border-top:none; }
 #viewer::-webkit-scrollbar{ width:10px; height:10px; }
 #viewer::-webkit-scrollbar-thumb{ background:rgba(0,0,0,.14); border-radius:5px;
   border:2px solid transparent; background-clip:padding-box; }
@@ -189,8 +236,12 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 </header>
 <main>
   <div id="stage">
-    <div id="viewer"><div id="doc"></div></div>
-    <div id="cursor"></div>
+    <div id="tabbar"><div id="tabs"></div></div>
+    <div id="workarea">
+      <aside id="toc"><div id="toc-title">目录</div></aside>
+      <div id="viewer"><div id="doc"></div></div>
+      <div id="cursor"></div>
+    </div>
   </div>
 </main>
 
@@ -198,8 +249,8 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
   <h2>LectureLite</h2>
   <p style="color:var(--dim);font-size:13px;margin:0 0 4px">源文件 + 你的声音 + 操作时间轴，不用录屏。</p>
   <ol>
-    <li><b>录制</b>：选择 <code>.md</code> / <code>.pdf</code>，或用<b>选文件夹</b>导入含 <code>images/</code> 的 md 项目，点击 <b>开始录制</b>（允许麦克风），边讲边滚动、选词、点击，停止后导出 <code>lecture.zip</code>。</li>
-    <li><b>播放</b>：选择 <code>lecture.zip</code>，按 <b>播放</b>。页面随音频自动滚动，还原光标与点击，可拖动进度、变速。</li>
+    <li><b>录制</b>：选择 <code>.md</code> / <code>.pdf</code>，或用<b>选文件夹</b>导入含 <code>images/</code> 的 md 项目；点击 <b>+ 添加文件</b> 可继续加文件。</li>
+    <li><b>播放</b>：选择 <code>lecture.zip</code>，按 <b>播放</b>。页面随音频自动滚动、还原光标与点击，可拖动进度、变速。录制中的多文件切换也会被自动还原。</li>
     <li>zip 内容 = 源文件 + audio + lecture.json。20 分钟讲解约 15 MB。</li>
   </ol>
   <p style="color:var(--dim2);font-size:12px;margin:0 0 16px">建议使用 Chrome；打开本页需联网加载渲染库。</p>
@@ -214,6 +265,8 @@ let selLayer = null;
 let contentEl = null;  // .md-content 或 .pdf-page 容器, 用于坐标归一化
 let mode = 'rec';
 let source = null;      // {name, blob, type:'md'|'pdf'}
+let files = [];         // [{name, blob, mime, imgFiles, type}]
+let currentFileIndex = -1;  // 当前激活的文件索引
 let recState = null;    // recording in progress / finished
 let play = null;        // playback state
 let pendingPlay = null;
@@ -229,6 +282,159 @@ function fmtTime(s){ s = Math.max(0, s|0); return (s/60|0) + ':' + String(s%60).
 function throttle(fn, ms){ let last = 0; return function(a){ const n = performance.now(); if (n - last < ms) return; last = n; fn(a); }; }
 function upperBound(arr, t){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m].t <= t) lo = m + 1; else hi = m; } return lo; }
 function baseName(n){ return n.replace(/\.[^.]+$/, ''); }
+
+/* ---------- tab bar management ---------- */
+const tabBar = $('tabbar'), tabsEl = $('tabs');
+
+function updateTabs(){
+  if (!tabsEl) return;
+  tabsEl.innerHTML = '';
+  for (let i = 0; i < files.length; i++){
+    const f = files[i];
+    const t = document.createElement('div');
+    t.className = 'tab' + (i === currentFileIndex ? ' active' : '');
+    // 短文件名截断
+    let displayName = f.name;
+    if (displayName.length > 35) displayName = '…' + displayName.slice(-32);
+    t.innerHTML = '<span class="tab-name" title="' + f.name + '">' + displayName + '</span>'
+      + '<span class="tab-close" data-idx="' + i + '" title="关闭">×</span>';
+    // 点击标签切换文件
+    t.querySelector('.tab-name').addEventListener('click', () => switchToFile(i));
+    // 点击 × 关闭文件
+    t.querySelector('.tab-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTab(i);
+    });
+    tabsEl.appendChild(t);
+  }
+}
+
+// 切换文件（渲染到工作区）
+async function switchToFile(fi){
+  if (fi < 0 || fi >= files.length) return;
+  const isChange = fi !== currentFileIndex;
+  // 记录切换时间戳（录制中，且确实切换了）
+  if (recState && isChange){
+    recState.fileSwitches.push({ t: Math.round(performance.now() - recState.st0), fi: fi });
+  }
+  
+  // 切换前：保存旧文件的状态（滚动位置 + 选中）
+  let savedSelOffsets = null;
+  if (isChange && currentFileIndex >= 0 && files[currentFileIndex]){
+    const old = files[currentFileIndex];
+    old.savedState = { scrollRatio: viewer.scrollTop / Math.max(1, viewer.scrollHeight - viewer.clientHeight) };
+    // 保存 md 选区偏移量
+    if (old.type === 'md' && selLayer && source && source.text){
+      const rects = selLayer.querySelectorAll('.sel-rect');
+      if (rects.length > 0){
+        savedSelOffsets = saveSelectionOffsets();
+      }
+    }
+  }
+  
+  currentFileIndex = fi;
+  const f = files[fi];
+  await renderSource(f.blob, f.name, f.imgFiles || []);
+  updateTabs();
+  
+  // 切回后：恢复该文件之前的状态
+  if (f.savedState){
+    const maxScroll = Math.max(1, viewer.scrollHeight - viewer.clientHeight);
+    viewer.scrollTop = f.savedState.scrollRatio * maxScroll;
+    // 恢复选中（仅 md）
+    if (f.type === 'md' && savedSelOffsets){
+      restoreSelection(savedSelOffsets);
+    }
+  }
+  
+  if (isChange) status('已切换到 ' + f.name);
+}
+
+// 关闭一个文件
+function closeTab(fi){
+  if (files.length <= 1) return;  // 至少保留一个
+  // 释放 blob URL
+  URL.revokeObjectURL(files[fi].blob && files[fi].blob._url);
+  files.splice(fi, 1);
+  // 调整 currentFileIndex
+  if (currentFileIndex >= files.length) currentFileIndex = files.length - 1;
+  if (currentFileIndex === fi){
+    // 关闭的是当前文件，切到前一个
+    switchToFile(Math.max(0, fi - 1));
+  } else {
+    if (currentFileIndex > fi) currentFileIndex--;
+    updateTabs();
+  }
+}
+
+// 添加文件（选择文件或文件夹后追加新文件）
+async function addFiles(fileList, imgFiles){
+  const mdFile = fileList.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name))
+              || fileList.find(f => !f.type.startsWith('image/'));
+  if (!mdFile) { status('未找到可加载的文件'); return; }
+  // 先渲染新文件（替换当前视图）
+  await renderSource(mdFile, mdFile.name, imgFiles || []);
+  // 如果已在录制状态，记录切换
+  if (recState){
+    recState.fileSwitches.push({ t: Math.round(performance.now() - recState.st0), fi: currentFileIndex });
+    status('已切换到 ' + files[currentFileIndex].name);
+  }
+}
+
+// 从 file input 事件获取文件并处理
+async function handleFileInput(e, appendMode){
+  const fileList = Array.from(e.target.files);
+  if (!fileList.length) return;
+  e.target.value = '';  // 重置以便下次选同一文件
+  const mdFile = fileList.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name))
+              || fileList.find(f => !f.type.startsWith('image/'));
+  const imgFiles = fileList.filter(f => f.type.startsWith('image/'));
+  if (!mdFile) { status('未找到可加载的文件'); return; }
+
+  if (appendMode){
+    // 追加模式：把文件加到 files 数组末尾，然后切过去
+    const mime = /\.pdf$/i.test(mdFile.name) ? 'application/pdf' : 'text/markdown';
+    files.push({ name: mdFile.name, blob: mdFile, mime, type: /\.pdf$/i.test(mdFile.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] });
+    currentFileIndex = files.length - 1;
+    await switchToFile(currentFileIndex);
+  } else {
+    // 覆盖模式：清空旧文件列表，只保留这个
+    files = [{ name: mdFile.name, blob: mdFile, mime: /\.pdf$/i.test(mdFile.name) ? 'application/pdf' : 'text/markdown', type: /\.pdf$/i.test(mdFile.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] }];
+    currentFileIndex = 0;
+    if (recState && !recState.finished) stopRec();
+    recState = null;
+    $('btnExport').disabled = true;
+    await switchToFile(0);
+  }
+}
+
+// 处理文件夹：提取所有 .md 文件并全部加载
+async function handleDirInput(e){
+  const fileList = Array.from(e.target.files);
+  if (!fileList.length) return;
+  e.target.value = '';
+  const mdFiles = fileList.filter(f => /\.(md|markdown|txt)$/i.test(f.name));
+  const pdfFiles = fileList.filter(f => /\.pdf$/i.test(f.name));
+  const allDocFiles = [...mdFiles, ...pdfFiles];
+  const imgFiles = fileList.filter(f => f.type.startsWith('image/'));
+
+  if (!allDocFiles.length){
+    status('文件夹中未找到 .md/.txt/.pdf 文件');
+    return;
+  }
+
+  if (recState && !recState.finished) stopRec();
+  recState = null;
+  $('btnExport').disabled = true;
+
+  files = [];
+  for (const f of allDocFiles){
+    files.push({ name: f.name, blob: f, mime: /\.pdf$/i.test(f.name) ? 'application/pdf' : 'text/markdown', type: /\.pdf$/i.test(f.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] });
+  }
+  currentFileIndex = 0;
+  await switchToFile(0);
+  status('已加载 ' + allDocFiles.length + ' 个文档');
+}
 
 // 获取实际内容元素 (.md-content / .pdf-page), 用于跨屏幕坐标归一化
 function getContentRect(){
@@ -256,6 +462,43 @@ function offsetsToRange(a, b){
   if (!sn || !en) return null;
   const r = document.createRange(); r.setStart(sn, so); r.setEnd(en, eo);
   return r;
+}
+
+// 从 selLayer 的 .sel-rect 元素中恢复选中的字符偏移量（通过比较每个文本节点位置）
+function saveSelectionOffsets(){
+  if (!selLayer || !source || !source.text) return null;
+  // 简化方案：直接取当前文档选区
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  return rangeToOffsets(range);
+}
+
+// 根据偏移量重建选区并渲染高亮
+function restoreSelection(offsets){
+  if (!offsets || !source || source.type !== 'md') return;
+  const [a, b] = offsets;
+  if (a === b) return;
+  const range = offsetsToRange(a, b);
+  if (!range) return;
+  
+  // 应用选区
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  
+  // 渲染高亮到 selLayer
+  selLayer.innerHTML = '';
+  const docR = doc.getBoundingClientRect();
+  for (const rc of range.getClientRects()){
+    const d = document.createElement('div');
+    d.className = 'sel-rect';
+    d.style.left = (rc.left - docR.left) + 'px';
+    d.style.top = (rc.top - docR.top) + 'px';
+    d.style.width = rc.width + 'px';
+    d.style.height = rc.height + 'px';
+    selLayer.appendChild(d);
+  }
 }
 
 /* ---------- source rendering (identical layout in record & play) ---------- */
@@ -348,8 +591,77 @@ async function renderSource(blob, name, imgFiles){
   selLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:5;';
   doc.appendChild(selLayer);
   viewer.scrollTop = 0;
-  if (mode === 'rec'){ $('btnStart').disabled = !source; }
+  // 非录制中才允许激活"开始录制"；录制中保持禁用
+  if (mode === 'rec'){ $('btnStart').disabled = !source || (recState !== null && !recState.finished); }
+  
+  // 生成目录
+  updateToc();
+  
   status('已加载 ' + name + '（' + (blob.size/1024).toFixed(0) + ' KB' + (imgFiles && imgFiles.length ? '，' + imgFiles.length + ' 张图片' : '') + '）');
+}
+
+/* ---------- TOC (目录) ---------- */
+function updateToc(){
+  const toc = $('toc');
+  if (!toc) return;
+  // 清空除标题外的内容
+  const titleEl = toc.querySelector('#toc-title');
+  toc.innerHTML = '';
+  if (titleEl) toc.appendChild(titleEl);
+  else {
+    const t = document.createElement('div');
+    t.id = 'toc-title';
+    t.textContent = '目录';
+    toc.appendChild(t);
+  }
+  
+  if (!source || !contentEl) return;
+  
+  if (source.type === 'md'){
+    // md: 提取 h1/h2/h3
+    const headings = contentEl.querySelectorAll('h1, h2, h3');
+    if (!headings.length){
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--dim2);font-size:12px;padding:8px 6px;';
+      empty.textContent = '无标题';
+      toc.appendChild(empty);
+      return;
+    }
+    headings.forEach((h, idx) => {
+      // 给每个标题加 id 以便跳转
+      const id = 'heading-' + idx;
+      h.id = id;
+      
+      const item = document.createElement('div');
+      const level = h.tagName.toLowerCase();
+      item.className = 'toc-item ' + level;
+      item.textContent = h.textContent;
+      item.title = h.textContent;
+      item.addEventListener('click', () => {
+        // 高亮当前
+        toc.querySelectorAll('.toc-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        // 滚动到对应标题
+        h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      toc.appendChild(item);
+    });
+  } else if (source.type === 'pdf'){
+    // pdf: 列出页面
+    const pages = doc.querySelectorAll('.pdf-page');
+    pages.forEach((page, idx) => {
+      page.id = 'pdf-page-' + idx;
+      const item = document.createElement('div');
+      item.className = 'toc-page';
+      item.textContent = '第 ' + (idx + 1) + ' 页';
+      item.addEventListener('click', () => {
+        toc.querySelectorAll('.toc-page').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        page.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      toc.appendChild(item);
+    });
+  }
 }
 
 /* ---------- recording ---------- */
@@ -374,44 +686,46 @@ function audioDuration(blob){
 $('srcFileBtn').addEventListener('click', () => $('srcPick').click());
 
 $('srcPick').addEventListener('change', e => {
-  const files = Array.from(e.target.files);
-  if (!files.length) return;
-  if (recState && !recState.finished) stopRec();
-  recState = null;
-  $('btnExport').disabled = true;
-  $('srcFileBtn').classList.add('active'); $('srcDirBtn').classList.remove('active');
-  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name)) || files.find(f => !f.type.startsWith('image/'));
-  const imgFiles = files.filter(f => f.type.startsWith('image/'));
-  renderSource(mdFile, mdFile.name, imgFiles);
+  handleFileInput(e, files.length > 0);  // 已有文件时追加，否则覆盖
 });
 
 // 选文件夹时用 webRelativePath 保留目录结构
 $('srcDir').addEventListener('change', e => {
-  const files = Array.from(e.target.files);
-  if (!files.length) return;
-  if (recState && !recState.finished) stopRec();
-  recState = null;
-  $('btnExport').disabled = true;
-  $('srcDirBtn').classList.add('active'); $('srcFileBtn').classList.remove('active');
-  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name));
-  const imgFiles = files.filter(f => f.type.startsWith('image/'));
-  if (mdFile) {
-    renderSource(mdFile, mdFile.name, imgFiles);
-  } else {
-    status('文件夹中未找到 .md 文件');
-  }
+  handleDirInput(e);
 });
 
 $('srcDirBtn').addEventListener('click', () => $('srcDir').click());
 
+// 工作区 tab 栏的 + 按钮 — 追加新文件
+let tabAddInput = null;
+if (tabBar){
+  const tabAddEl = document.createElement('div');
+  tabAddEl.id = 'tabAdd';
+  tabAddEl.textContent = '+';
+  tabAddEl.title = '添加文件';
+  tabBar.appendChild(tabAddEl);
+  tabAddEl.addEventListener('click', () => {
+    if (!tabAddInput) {
+      tabAddInput = document.createElement('input');
+      tabAddInput.type = 'file';
+      tabAddInput.accept = '.md,.markdown,.txt,.pdf,image/*';
+      tabAddInput.multiple = true;
+      tabAddInput.style.display = 'none';
+      document.body.appendChild(tabAddInput);
+      tabAddInput.addEventListener('change', e => {
+        handleFileInput(e, true);  // 追加模式
+        tabAddInput = null;
+      });
+    }
+    tabAddInput.click();
+  });
+}
+
 $('srcPick2').addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (!files.length || !pendingPlay) return;
-  const mdFile = files.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name)) || files.find(f => !f.type.startsWith('image/'));
-  const imgFiles = files.filter(f => f.type.startsWith('image/'));
-  await renderSource(mdFile || files[0], pendingPlay.json.file.name, imgFiles);
-  startPlayback(pendingPlay);
+  const filesIn = Array.from(e.target.files);
+  if (!filesIn.length || !pendingPlay) return;
   pendingPlay = null;
+  $('srcPick2').classList.add('hidden');
 });
 
 async function startRec(){
@@ -425,7 +739,7 @@ async function startRec(){
   const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined);
   const chunks = [];
   rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-  const states = [], cursor = [], clicks = [];
+  const states = [], cursor = [], clicks = [], fileSwitches = [];
   let lastKey = '', selKey = '';
   const st0 = performance.now();
   rec.start(1000);
@@ -470,7 +784,7 @@ async function startRec(){
   document.addEventListener('selectionchange', onScroll);
   const iv = setInterval(pushState, 250);
 
-  recState = { rec, chunks, states, cursor, clicks, st0, stream, iv, onScroll, onMove, onDown, finished: false };
+  recState = { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown, finished: false };
   $('btnStart').disabled = true;
   $('btnStop').disabled = false;
   $('srcPick').disabled = true;
@@ -485,7 +799,7 @@ $('btnStart').addEventListener('click', startRec);
 
 function stopRec(){
   if (!recState || recState.finished) return;
-  const { rec, chunks, states, cursor, clicks, st0, stream, iv, onScroll, onMove, onDown } = recState;
+  const { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown } = recState;
   clearInterval(iv);
   clearInterval(timerIv);
   viewer.removeEventListener('scroll', onScroll);
@@ -497,10 +811,13 @@ function stopRec(){
   // 同步组装导出数据 —— 不依赖 onstop 异步回调,确保停止后立即可导出
   const audioBlob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
   const json = {
-    v: 1, app: 'LectureLite', created: new Date().toISOString(),
+    v: 2, app: 'LectureLite', created: new Date().toISOString(),
     duration: (performance.now() - st0) / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
-    file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
+    // 兼容旧格式：若有多个文件用 files，否则保留 file
+    file: { name: (files[currentFileIndex] || {}).name || source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
+    files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+    fileSwitches,
     states, cursor, clicks
   };
   recState = { audioBlob, json, finished: true };
@@ -511,7 +828,7 @@ function stopRec(){
   $('btnExport').disabled = false;
   $('btnShare').disabled = false;
   $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
-  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
+  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样，' + files.length + ' 个文件，' + fileSwitches.length + ' 次切换 → 可导出');
 
   // onstop 异步回调只负责用更精确的时长刷新一次(可选),失败也不影响导出
   rec.onstop = async () => {
@@ -536,11 +853,13 @@ async function exportZip(){
   const { audioBlob, json } = recState;
   const zip = new JSZip();
   if ($('embedSrc').checked){
-    zip.file(json.file.name, source.blob);
-    // 把图片也打进 zip, 保留相对路径结构
-    if (source.imgFiles){
-      for (const f of source.imgFiles){
-        zip.file(f.name, f);
+    // 打包所有文件（含图片）
+    for (const f of files){
+      zip.file(f.name, f.blob);
+      if (f.imgFiles){
+        for (const img of f.imgFiles){
+          zip.file(img.name, img);
+        }
       }
     }
   }
@@ -551,10 +870,10 @@ async function exportZip(){
   const blob = await zip.generateAsync({ type: 'blob' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = baseName(json.file.name) + '.lecture.zip';
+  a.download = baseName(files[0].name) + '.lecture.zip';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB）— 把这一个文件发给听众即可');
+  status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB，' + files.length + ' 个文件）— 把这一个文件发给听众即可');
 }
 $('btnExport').addEventListener('click', exportZip);
 
@@ -569,7 +888,7 @@ async function doShare(zipBlob, fileName, linkInputId, wrapId){
     const data = await res.json();
     $(linkInputId).value = data.url;
     $(wrapId).classList.remove('hidden');
-    status('分享链接已生成，复制发给同事即可');
+    status('分享链接已生成');
     return data.url;
   } catch (err){
     $(linkInputId).value = '';
@@ -584,15 +903,17 @@ $('btnShare').addEventListener('click', async () => {
   status('正在打包并上传…');
   const zip = new JSZip();
   if ($('embedSrc').checked){
-    zip.file(json.file.name, source.blob);
-    if (source.imgFiles){ for (const f of source.imgFiles) zip.file(f.name, f); }
+    for (const f of files){
+      zip.file(f.name, f.blob);
+      if (f.imgFiles){ for (const img of f.imgFiles) zip.file(img.name, img); }
+    }
   }
   const ty = audioBlob.type || 'audio/webm';
   const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
   zip.file('audio.' + ext, audioBlob);
   zip.file('lecture.json', JSON.stringify(json));
   const zipBlob = await zip.generateAsync({ type: 'blob' });
-  doShare(zipBlob, baseName(json.file.name) + '.lecture.zip', 'shareLink', 'shareLinkWrap');
+  doShare(zipBlob, baseName(files[0].name) + '.lecture.zip', 'shareLink', 'shareLinkWrap');
 });
 
 $('copyLink').addEventListener('click', () => {
@@ -610,20 +931,26 @@ async function loadZip(file){
   lastLoadedZipName = file.name;
   try {
     const zip = await JSZip.loadAsync(file);
-    let json = null, audioEntry = null, srcEntry = null;
-    const imgEntries = [];
+    let json = null, audioEntry = null;
+    const imgEntries = {};
     for (const name in zip.files){
       const e = zip.files[name];
       if (e.dir) continue;
       if (/\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(name)) audioEntry = e;
       else if (name.endsWith('.json')) json = JSON.parse(await e.async('string'));
-      else if (/\.(png|jpe?g|gif|svg|bmp|webp|avif)$/i.test(name)) imgEntries.push(e);
-      else srcEntry = e;
+      else if (/\.(png|jpe?g|gif|svg|bmp|webp|avif)$/i.test(name)){
+        if (!imgEntries[name]) imgEntries[name] = [];
+        imgEntries[name].push(e);
+      }
     }
     if (!json) throw new Error('zip 里找不到 .json 时间轴');
     if (!audioEntry) throw new Error('zip 里找不到音频文件');
     const audioBlob = await audioEntry.async('blob');
-    const name = json.file && json.file.name ? json.file.name : srcEntry ? srcEntry.name : 'source';
+
+    // 兼容旧格式：无 files 字段时用 file
+    const fileMetaList = json.files && json.files.length ? json.files : [{ name: json.file && json.file.name, mime: json.file && json.file.mime }];
+    const name = (fileMetaList[0] && fileMetaList[0].name) || 'source';
+
     if (play && play.audio){ play.active = false; play.audio.pause(); }
     play = null;
     $('btnPlay').disabled = true; $('btnPlay').textContent = '▶ 播放';
@@ -631,22 +958,44 @@ async function loadZip(file){
     $('time').textContent = '–:––';
     $('cursor').style.display = 'none';
     $('srcPick2').classList.add('hidden');
-    if (srcEntry){
-      const srcBlob = await srcEntry.async('blob');
-      // 从 zip 中恢复图片为 File 对象数组
-      const imgFiles = [];
-      for (const ie of imgEntries){
-        const ib = await ie.async('blob');
-        imgFiles.push(new File([ib], ie.name, { type: ib.type || 'image/png' }));
-      }
-      await renderSource(srcBlob, name, imgFiles);
-      startPlayback({ json, audioBlob });
-      $('btnSharePlay').disabled = false;
-    } else {
-      status('该 zip 未包含源文件 — 请手动选择源文件（' + name + '）：');
-      pendingPlay = { json, audioBlob };
-      $('srcPick2').classList.remove('hidden');
+
+    // 从 zip 中收集所有源文件（排除 json/audio）
+    const fileBlobs = {};  // name -> {blob}
+    for (const zipName in zip.files){
+      const e = zip.files[zipName];
+      if (e.dir || zipName.endsWith('.json') || /\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(zipName)) continue;
+      fileBlobs[zipName] = await e.async('blob');
     }
+
+    // 按 json.files 顺序构建播放文件列表
+    const preparedFiles = [];
+    for (const meta of fileMetaList){
+      const entry = fileBlobs[meta.name];
+      if (!entry) continue;
+      // 收集该文件对应的图片（同一目录）
+      const imgForFile = [];
+      for (const imgName in imgEntries){
+        for (const ie of imgEntries[imgName]){
+          imgForFile.push(new File([await ie.async('blob')], ie.name, { type: 'image/png' }));
+        }
+      }
+      const type = /\.pdf$/i.test(meta.name) ? 'pdf' : 'md';
+      preparedFiles.push({ name: meta.name, mime: meta.mime, blob: entry, imgFiles: imgForFile, type });
+    }
+
+    if (!preparedFiles.length){
+      status('该 zip 未包含源文件 — 请手动选择源文件：');
+      pendingPlay = { json, audioBlob, preparedFiles: [] };
+      $('srcPick2').classList.remove('hidden');
+      return;
+    }
+
+    // 加载所有文件到工作区，激活第一个
+    files = preparedFiles;
+    currentFileIndex = 0;
+    await switchToFile(0);
+    startPlayback({ json, audioBlob });
+    $('btnSharePlay').disabled = false;
   } catch (err){ status('加载失败：' + err.message); }
 }
 $('zipPick').addEventListener('change', e => {
@@ -667,6 +1016,7 @@ function startPlayback({ json, audioBlob }){
     states: json.states || [],
     cursor: json.cursor || [],
     clicks: json.clicks || [],
+    fileSwitches: json.fileSwitches || [],
     clickIdx: 0, lastKey: '',
     meta: json.viewport || { w: viewer.clientWidth, h: viewer.clientHeight },
     dur: json.duration || 0, active: false
@@ -680,7 +1030,7 @@ function startPlayback({ json, audioBlob }){
   audio.addEventListener('ended', () => { play.active = false; $('btnPlay').textContent = '▶ 重播'; });
   $('btnPlay').disabled = false;
   const initDur = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (json.duration || 0);
-  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样 → 按 ▶ 播放');
+  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样，' + files.length + ' 个文件 → 按 ▶ 播放');
 }
 $('btnPlay').addEventListener('click', () => {
   if (!play) return;
@@ -698,8 +1048,54 @@ $('seek').addEventListener('input', e => {
   play.clickIdx = 0;
   for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= t) play.clickIdx++; }
   play.lastKey = '';
+  // 重新定位到播放位置对应的文件
+  const fi = getFileIndexAt(t);
+  if (fi !== currentFileIndex){
+    setActiveFile(fi);
+  }
 });
 $('rate').addEventListener('change', e => { if (play) play.audio.playbackRate = parseFloat(e.target.value); });
+
+// 查找时间点对应的文件索引
+function getFileIndexAt(t){
+  let fi = 0;
+  for (const fs of play.fileSwitches){
+    if (fs.t <= t) fi = fs.fi;
+    else break;
+  }
+  return Math.min(fi, files.length - 1);
+}
+
+// 播放时切换激活文件（不记录，不触发录音）
+async function setActiveFile(fi){
+  if (fi < 0 || fi >= files.length) return;
+  // 播放时切换文件：保存旧文件状态（可选，因为播放时 applyState 会恢复 scrollTop）
+  let savedSelOffsets = null;
+  if (currentFileIndex >= 0 && files[currentFileIndex]){
+    const old = files[currentFileIndex];
+    old.savedState = { scrollRatio: viewer.scrollTop / Math.max(1, viewer.scrollHeight - viewer.clientHeight) };
+    if (old.type === 'md' && selLayer && source && source.text){
+      const rects = selLayer.querySelectorAll('.sel-rect');
+      if (rects.length > 0){
+        savedSelOffsets = saveSelectionOffsets();
+      }
+    }
+  }
+  
+  currentFileIndex = fi;
+  const f = files[fi];
+  await renderSource(f.blob, f.name, f.imgFiles || []);
+  updateTabs();
+  
+  // 恢复该文件之前状态
+  if (f.savedState){
+    const maxScroll = Math.max(1, viewer.scrollHeight - viewer.clientHeight);
+    viewer.scrollTop = f.savedState.scrollRatio * maxScroll;
+    if (f.type === 'md' && savedSelOffsets){
+      restoreSelection(savedSelOffsets);
+    }
+  }
+}
 
 function applyState(t){
   const st = play.states;
@@ -710,6 +1106,11 @@ function applyState(t){
   const key = (s.sr !== undefined ? Math.round(s.sr * 1000) : s.y) + '|' + (s.s ? s.s.a + ',' + s.s.b : '');
   if (key === play.lastKey) return;
   play.lastKey = key;
+  // 检查是否需要切换文件
+  const expectedFi = getFileIndexAt(t);
+  if (expectedFi !== currentFileIndex){
+    setActiveFile(expectedFi);
+  }
   // 优先使用比例 sr, 兼容旧数据的绝对像素 y
   if (s.sr !== undefined){
     const maxScroll = viewer.scrollHeight - viewer.clientHeight;
