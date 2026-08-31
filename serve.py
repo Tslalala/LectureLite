@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 
-import sys, os, json, uuid, socket, webbrowser, urllib.parse
+import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from pathlib import Path
+
+# ── LLM 文稿生成（按需导入，无 openai 包也能工作）──
+try:
+    from llm.script_generator import generate_script as _gen_script
+    from llm.script_generator import generate_script_stream as _gen_script_stream
+except ImportError:
+    _gen_script = None
+    _gen_script_stream = None
 
 PORT = 8663
 WEB_DIR = Path(__file__).parent.resolve()
@@ -24,6 +33,8 @@ LAN_IP = "127.0.0.1"
 
 
 class Handler(BaseHTTPRequestHandler):
+    # 使用 HTTP/1.1 以支持流式响应 (SSE)
+    protocol_version = "HTTP/1.1"
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -82,16 +93,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"Not Found", "text/plain")
 
     def do_POST(self):
-        if self.path != "/share":
+        if self.path == "/share":
+            self._handle_share()
+        elif self.path == "/generate-script":
+            self._handle_generate_script()
+        elif self.path == "/generate-script-stream":
+            self._handle_generate_script_stream()
+        else:
             self._send(404, b"Not Found", "text/plain")
             return
 
+    # ── /share ──
+    def _handle_share(self):
         ctype = self.headers.get("Content-Type", "")
         if "multipart/form-data" not in ctype:
             self._send(400, b"Expected multipart/form-data", "text/plain")
             return
 
-        # 解析 multipart
         boundary = self._get_boundary(ctype)
         if not boundary:
             self._send(400, b"No boundary", "text/plain")
@@ -105,18 +123,111 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, b"No file in upload", "text/plain")
             return
 
-        # 保存到 shared/
         SHARED_DIR.mkdir(exist_ok=True)
         share_id = uuid.uuid4().hex[:8]
         safe_name = os.path.basename(filename)
         stored_name = f"{share_id}_{safe_name}"
         (SHARED_DIR / stored_name).write_bytes(filedata)
 
-        # 生成分享 URL
         url = f"http://{LAN_IP}:{PORT}/lecture-lite.html?src=shared/{urllib.parse.quote(stored_name)}"
 
         body = json.dumps({ "url": url, "id": share_id }).encode()
         self._send(200, body, "application/json")
+
+    # ── /generate-script ──
+    def _handle_generate_script(self):
+        if not _gen_script:
+            self._send_json(503, {"error": "llm.script_generator 未找到"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+
+            content = data.get("content", "")
+            topic = data.get("topic", "")
+            length = data.get("length", "medium")
+
+            if not content:
+                self._send_json(400, {"error": "缺少文档内容"})
+                return
+
+            script = _gen_script(content, topic, length)
+
+            self._send_json(200, {
+                "success": True,
+                "script": script,
+            })
+        except Exception as e:
+            self._send_json(500, {"error": f"生成失败: {str(e)}"})
+
+    # ── /generate-script-stream（流式输出）──
+    def _handle_generate_script_stream(self):
+        if not _gen_script_stream:
+            self._send_json(503, {"error": "llm.script_generator 未找到"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+
+            content = data.get("content", "")
+            topic = data.get("topic", "")
+            length = data.get("length", "medium")
+
+            if not content:
+                self._send_json(400, {"error": "缺少文档内容"})
+                return
+
+            # SSE 流式响应（不设 Content-Length，发完关闭连接通知客户端）
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self._cors()
+            self.end_headers()
+
+            full_text = ""
+            for piece in _gen_script_stream(content, topic, length):
+                full_text += piece
+                # SSE 格式：data: <json>\n\n
+                sse_data = json.dumps({"delta": piece}, ensure_ascii=False)
+                chunk = f"data: {sse_data}\n\n".encode("utf-8")
+                self.wfile.write(chunk)
+                self.wfile.flush()
+
+            # 发送结束标记
+            end_data = json.dumps({"done": True, "full": full_text}, ensure_ascii=False)
+            end_chunk = f"data: {end_data}\n\n".encode("utf-8")
+            self.wfile.write(end_chunk)
+            self.wfile.flush()
+
+            # 通知客户端完成并关闭连接
+            done_marker = b"data: [DONE]\n\n"
+            self.wfile.write(done_marker)
+            self.wfile.flush()
+            # 关闭当前请求的连接
+            self.close_connection = True
+
+        except Exception as e:
+            error_data = json.dumps({"error": str(e)}, ensure_ascii=False)
+            error_chunk = f"data: {error_data}\n\n".encode("utf-8")
+            try:
+                self.wfile.write(error_chunk)
+                self.wfile.flush()
+            except Exception:
+                pass
+
+    def _send_json(self, code, data):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self._cors()
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     # ── multipart helpers ──
 
@@ -187,7 +298,12 @@ def main():
         sys.exit(1)
 
     LAN_IP = get_lan_ip()
-    httpd = HTTPServer(("0.0.0.0", PORT), Handler)
+
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        """多线程 HTTP 服务器，支持流式响应。"""
+        pass
+
+    httpd = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
 
     url = f"http://127.0.0.1:{PORT}/lecture-lite.html"
     print("=" * 60)

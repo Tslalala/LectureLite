@@ -157,6 +157,35 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 .pdf-page .textLayer span{ color:transparent; }
 .sel-rect{ position:absolute; background:rgba(196,66,58,.18); border-radius:2px; }
 
+/* —— script panel (自动生成文稿) —— */
+#scriptPanel{ display:none; position:absolute; right:16px; top:16px; width:400px; max-height:70vh;
+  background:var(--surface); border:1px solid var(--line2); border-radius:12px;
+  box-shadow:0 4px 24px rgba(0,0,0,.12); z-index:20; flex-direction:column; overflow:hidden; }
+#scriptPanel.show{ display:flex; }
+#scriptPanel.collapsed .script-inner{ display:none; }
+#scriptPanel-header{ flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+  padding:10px 14px; border-bottom:1px solid var(--line); font-size:13px; font-weight:600; color:var(--fg); cursor:pointer; }
+#scriptPanel-header:hover{ background:var(--surface2); }
+#scriptPanel-title{ user-select:none; }
+#scriptPanel-toggle{ width:28px; height:28px; padding:0; border-radius:50%; font-size:14px; line-height:1;
+  display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
+  border:1px solid var(--line); background:var(--surface); color:var(--dim); flex-shrink:0; }
+#scriptPanel-toggle:hover{ background:var(--surface2); color:var(--fg); }
+.script-inner{ flex:1; display:flex; flex-direction:column; min-height:0; }
+#scriptPanel-body{ flex:1; overflow:auto; padding:16px; font-size:14.5px; line-height:1.7;
+  color:#1f1f1d; white-space:pre-wrap; word-break:break-word; min-height:120px; }
+#scriptPanel-body.placeholder{ color:var(--dim2); font-style:italic; }
+#scriptPanel-edit{ display:none; }
+#scriptPanel.edit-mode #scriptPanel-body{ display:none; }
+#scriptPanel.edit-mode #scriptPanel-edit{ display:block; }
+#scriptPanel-edit textarea{ width:100%; height:100%; min-height:200px; resize:vertical;
+  border:none; outline:none; padding:16px; font-size:14.5px; line-height:1.7;
+  color:#1f1f1d; background:var(--surface); font-family:inherit; white-space:pre-wrap;
+  word-break:break-word; }
+#scriptPanel-actions{ flex-shrink:0; display:flex; gap:6px; padding:8px 14px;
+  border-top:1px solid var(--line); background:var(--surface2); flex-wrap:wrap; }
+#scriptPanel-actions button{ font-size:13px; padding:5px 12px; }
+
 /* —— playback overlays —— */
 #cursor{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
   background:#e8362f; border:2px solid #fff; pointer-events:none; z-index:9; display:none;
@@ -211,6 +240,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
     <button id="btnStop" disabled>停止</button>
     <button id="btnExport" disabled>导出</button>
     <button id="btnShare" disabled>分享</button>
+    <button id="btnAutoScript" disabled title="调用大模型生成讲解稿">自动生成文稿</button>
     <span id="recTimer" style="color:var(--dim);font-size:12px"></span>
     <span id="shareLinkWrap" class="share-link-wrap hidden">
       <input type="text" id="shareLink" readonly>
@@ -241,6 +271,22 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
       <aside id="toc"><div id="toc-title">目录</div></aside>
       <div id="viewer"><div id="doc"></div></div>
       <div id="cursor"></div>
+    </div>
+    <div id="scriptPanel" class="hidden">
+      <div id="scriptPanel-header">
+        <span id="scriptPanel-title">讲解稿</span>
+        <button id="scriptPanel-toggle" title="收起/展开">▼</button>
+      </div>
+      <div class="script-inner">
+        <div id="scriptPanel-body" class="placeholder">点击「✨ 自动生成文稿」从当前文档生成讲解稿。</div>
+        <div id="scriptPanel-edit"><textarea placeholder="在此编辑文稿…"></textarea></div>
+        <div id="scriptPanel-actions">
+          <button id="scriptEdit">编辑</button>
+          <button id="scriptSave" class="primary">保存</button>
+          <button id="scriptCopy">复制</button>
+          <button id="scriptRegen">重新生成</button>
+        </div>
+      </div>
     </div>
   </div>
 </main>
@@ -593,6 +639,8 @@ async function renderSource(blob, name, imgFiles){
   viewer.scrollTop = 0;
   // 非录制中才允许激活"开始录制"；录制中保持禁用
   if (mode === 'rec'){ $('btnStart').disabled = !source || (recState !== null && !recState.finished); }
+  // 加载了文档后启用"自动生成文稿"
+  $('btnAutoScript').disabled = !source;
   
   // 生成目录
   updateToc();
@@ -1194,6 +1242,182 @@ function setMode(m){
 }
 $('modeRec').addEventListener('click', () => setMode('rec'));
 $('modePlay').addEventListener('click', () => setMode('play'));
+
+/* ---------- 自动生成文稿 ---------- */
+const scriptPanel = $('scriptPanel');
+const scriptBody = $('scriptPanel-body');
+const scriptTextarea = $('scriptPanel-edit').querySelector('textarea');
+let lastGeneratedScript = '';
+
+// 从当前加载的文档提取可用于生成文稿的文本
+function getDocText(){
+  if (!source) return '';
+  if (source.type === 'md' && source.text) return source.text;
+  // PDF 没有 text 字段，尝试从内容提取
+  if (contentEl) return contentEl.textContent || '';
+  return '';
+}
+
+// 获取当前文稿内容（编辑模式下取 textarea）
+function getCurrentScript(){
+  if (scriptPanel.classList.contains('edit-mode')){
+    return scriptTextarea.value;
+  }
+  return lastGeneratedScript;
+}
+
+// 流式生成文稿（SSE）
+async function autoGenerateScriptStream(){
+  if (!source || !files.length){ status('请先加载文档'); return; }
+  const text = getDocText().trim();
+  if (!text){ status('未能提取文档文字', true); return; }
+
+  const btn = $('btnAutoScript');
+  btn.disabled = true;
+  const oldLabel = btn.textContent;
+  btn.textContent = '生成中…';
+
+  // 显示面板
+  scriptPanel.classList.remove('hidden');
+  scriptPanel.classList.add('show');
+  // 收起状态也展开
+  scriptPanel.classList.remove('collapsed');
+  // 退出编辑模式
+  scriptPanel.classList.remove('edit-mode');
+  scriptBody.classList.remove('placeholder');
+  scriptBody.textContent = '正在生成讲解稿，请稍候…';
+
+  let fullText = '';
+  try {
+    const resp = await fetch('/generate-script-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: text,
+        topic: (source && source.name) ? baseName(source.name) : '',
+        length: 'medium'
+      })
+    });
+
+    if (!resp.ok){
+      throw new Error('HTTP ' + resp.status);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true){
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();  // 保留最后一个不完整的行
+
+      for (const line of lines){
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        const jsonStr = trimmed.slice(6);
+        try {
+          const chunk = JSON.parse(jsonStr);
+          if (chunk.delta){
+            fullText += chunk.delta;
+            scriptBody.textContent = fullText;
+            // 自动滚动到底部
+            scriptBody.scrollTop = scriptBody.scrollHeight;
+          } else if (chunk.done){
+            fullText = chunk.full;
+            scriptBody.textContent = fullText;
+            lastGeneratedScript = fullText;
+            status('讲解稿生成完成');
+          } else if (chunk.error){
+            throw new Error(chunk.error);
+          }
+        } catch (e){
+          // JSON 解析失败，跳过
+        }
+      }
+    }
+
+    // 处理剩余 buffer
+    if (buffer.trim()){
+      const trimmed = buffer.trim();
+      if (trimmed.startsWith('data: ')){
+        try {
+          const chunk = JSON.parse(trimmed.slice(6));
+          if (chunk.done){
+            fullText = chunk.full;
+            scriptBody.textContent = fullText;
+            lastGeneratedScript = fullText;
+          }
+        } catch (e){}
+      }
+    }
+
+    if (!lastGeneratedScript){
+      scriptBody.classList.add('placeholder');
+      scriptBody.textContent = '生成完成但无输出';
+      status('生成完成但内容为空');
+    }
+
+  } catch (e){
+    scriptBody.classList.add('placeholder');
+    scriptBody.textContent = '生成失败: ' + e.message;
+    status('生成失败: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldLabel;
+  }
+}
+
+// 按钮事件
+$('btnAutoScript').addEventListener('click', autoGenerateScriptStream);
+$('scriptRegen').addEventListener('click', autoGenerateScriptStream);
+
+// 折叠 / 展开
+$('scriptPanel-header').addEventListener('click', (e) => {
+  if (e.target.id === 'scriptPanel-toggle'){
+    toggleScriptPanel();
+  } else {
+    // 点击标题栏也切换折叠
+    toggleScriptPanel();
+  }
+});
+
+function toggleScriptPanel(){
+  scriptPanel.classList.toggle('collapsed');
+  const btn = $('scriptPanel-toggle');
+  btn.textContent = scriptPanel.classList.contains('collapsed') ? '▲' : '▼';
+}
+
+// 编辑 / 保存
+$('scriptEdit').addEventListener('click', () => {
+  scriptPanel.classList.add('edit-mode');
+  // 将当前文稿同步到 textarea
+  scriptTextarea.value = lastGeneratedScript || scriptBody.textContent || '';
+});
+
+$('scriptSave').addEventListener('click', () => {
+  scriptPanel.classList.remove('edit-mode');
+  lastGeneratedScript = scriptTextarea.value;
+  scriptBody.textContent = lastGeneratedScript || '(空文稿)';
+  scriptBody.classList.remove('placeholder');
+  status('文稿已保存');
+});
+
+// 复制
+$('scriptCopy').addEventListener('click', async () => {
+  const text = getCurrentScript();
+  if (!text){ status('还没有可复制的文稿'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    status('已复制到剪贴板');
+  } catch (e){
+    status('复制失败，请手动选择文本复制', true);
+  }
+});
+
 function showHelp(){ $('intro').classList.add('show'); }
 function hideHelp(){ $('intro').classList.remove('show'); }
 $('helpBtn').addEventListener('click', showHelp);
