@@ -114,6 +114,53 @@ def generate_script_stream(content, topic="", length="medium"):
             yield delta
 
 
+def generate_script_timeline_stream(content, topic="", length="medium"):
+    """流式生成带时间轴的讲解稿（NDJSON：每行 {text, anchor}）。
+
+    时间戳由前端按字数计算，模型只输出句子和对应的文档锚点。
+    Yields: 模型输出的原始文本片段
+    """
+    duration_label = LENGTH_MAP.get(length, "10-15分钟")
+    clipped = content[:6000]
+
+    system = (
+        "你是一位专业的演讲教练和内容策划专家。"
+        "请根据文档内容生成一份口语化的讲解稿，以句子为单位。\n"
+        "输出格式：每行一个 JSON 对象（NDJSON），"
+        "不要 markdown 代码块，不要 ```json 包裹，不要多余文字：\n"
+        '{"text":"口语化的讲解句","anchor":"文档中对应的原文片段"}\n'
+        "规则：\n"
+        "1. text: 纯口语讲解口吻，单句不超过 150 字，适合朗读\n"
+        "2. anchor: 该句讲解时对应的文档原文片段，必须是文档中出现的原文（用于定位高亮），尽量取完整短语或句子，不要改写\n"
+        "3. 按讲解顺序逐行输出，覆盖文档主要内容，结构：开场引入 → 主体要点 → 总结升华\n"
+        "4. 每行一个完整 JSON，不要在 JSON 内部换行，不要输出 JSON 以外的任何内容"
+    )
+
+    user = (
+        f"请为以下文档生成约 {duration_label} 的讲解稿。\n\n"
+        f"讲解主题：{topic if topic else '（请根据内容确定合适的主题）'}\n\n"
+        f"===== 文档内容 =====\n{clipped}\n===== 结束 =====\n\n"
+        "请按 NDJSON 格式逐行输出，每行一个 JSON。"
+    )
+
+    stream = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        temperature=0.7,
+        max_tokens=4000,
+        stream=True,
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
 if __name__ == "__main__":
     # 命令行自测
     test = """# Python 入门

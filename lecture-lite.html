@@ -185,6 +185,22 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #scriptPanel-actions{ flex-shrink:0; display:flex; gap:6px; padding:8px 14px;
   border-top:1px solid var(--line); background:var(--surface2); flex-wrap:wrap; }
 #scriptPanel-actions button{ font-size:13px; padding:5px 12px; }
+#scriptRecord{ background:var(--rec); border-color:var(--rec); color:#fff; }
+#scriptRecord:hover:not(:disabled){ background:#a83a32; border-color:#a83a32; }
+#scriptRecord:active:not(:disabled){ background:#8e2e28; }
+#scriptRecord:disabled{ opacity:.35; }
+#scriptTtsRow{ flex-shrink:0; display:flex; align-items:center; gap:8px;
+  padding:6px 14px; border-top:1px solid var(--line); background:var(--surface2); font-size:12px; }
+#scriptTtsRow label{ font-size:12px; display:inline-flex; align-items:center; gap:4px; }
+#scriptTtsRow select{ font-size:12px; padding:3px 6px; border-radius:5px; }
+#scriptTtsRow input[type=range]{ width:70px; height:3px; accent-color:var(--acc); }
+.script-line{ display:flex; gap:8px; padding:5px 0; border-bottom:1px dashed var(--line);
+  line-height:1.6; cursor:default; border-radius:3px; transition:background .15s; }
+.script-line .script-t{ flex-shrink:0; font-size:12px; color:var(--dim2); font-variant-numeric:tabular-nums;
+  padding-top:2px; min-width:40px; user-select:none; }
+.script-line .script-s{ flex:1; }
+.script-line.active{ background:rgba(196,66,58,.10); }
+.script-line.active .script-t{ color:var(--rec); font-weight:600; }
 
 /* —— playback overlays —— */
 #cursor{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
@@ -280,11 +296,18 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
       <div class="script-inner">
         <div id="scriptPanel-body" class="placeholder">点击「✨ 自动生成文稿」从当前文档生成讲解稿。</div>
         <div id="scriptPanel-edit"><textarea placeholder="在此编辑文稿…"></textarea></div>
+        <div id="scriptTtsRow">
+          <label title="使用浏览器语音合成朗读文稿"><input type="checkbox" id="scriptTtsEnabled" checked>语音</label>
+          <select id="scriptTtsVoice" title="选择语音"></select>
+          <label>语速<input type="range" id="scriptTtsRate" min="0.5" max="2" step="0.1" value="1"></label>
+          <span id="scriptTtsRateVal" style="color:var(--dim);min-width:24px">1.0×</span>
+        </div>
         <div id="scriptPanel-actions">
           <button id="scriptEdit">编辑</button>
           <button id="scriptSave" class="primary">保存</button>
           <button id="scriptCopy">复制</button>
           <button id="scriptRegen">重新生成</button>
+          <button id="scriptRecord" disabled title="按时间轴自动执行录制，不录音频">录制演讲</button>
         </div>
       </div>
     </div>
@@ -846,6 +869,8 @@ async function startRec(){
 $('btnStart').addEventListener('click', startRec);
 
 function stopRec(){
+  // 录制演讲进行中：中止它
+  if (recordingScript){ scriptRecAbort = true; return; }
   if (!recState || recState.finished) return;
   const { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown } = recState;
   clearInterval(iv);
@@ -911,9 +936,13 @@ async function exportZip(){
       }
     }
   }
-  const ty = audioBlob.type || 'audio/webm';
-  const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
-  zip.file('audio.' + ext, audioBlob);
+  let audioNote = '';
+  if (audioBlob){
+    const ty = audioBlob.type || 'audio/webm';
+    const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
+    zip.file('audio.' + ext, audioBlob);
+    audioNote = '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB';
+  }
   zip.file('lecture.json', JSON.stringify(json));
   const blob = await zip.generateAsync({ type: 'blob' });
   const a = document.createElement('a');
@@ -921,7 +950,7 @@ async function exportZip(){
   a.download = baseName(files[0].name) + '.lecture.zip';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB，' + files.length + ' 个文件）— 把这一个文件发给听众即可');
+  status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB，' + files.length + ' 个文件' + audioNote + '）— 把这一个文件发给听众即可');
 }
 $('btnExport').addEventListener('click', exportZip);
 
@@ -992,8 +1021,7 @@ async function loadZip(file){
       }
     }
     if (!json) throw new Error('zip 里找不到 .json 时间轴');
-    if (!audioEntry) throw new Error('zip 里找不到音频文件');
-    const audioBlob = await audioEntry.async('blob');
+    const audioBlob = audioEntry ? await audioEntry.async('blob') : null;
 
     // 兼容旧格式：无 files 字段时用 file
     const fileMetaList = json.files && json.files.length ? json.files : [{ name: json.file && json.file.name, mime: json.file && json.file.mime }];
@@ -1056,48 +1084,83 @@ $('btnSharePlay').addEventListener('click', () => {
   doShare(lastLoadedZipBlob, lastLoadedZipName, 'shareLink2', 'shareLinkWrap2');
 });
 function startPlayback({ json, audioBlob }){
-  const audio = new Audio();
-  audio.src = URL.createObjectURL(audioBlob);
-  audio.playbackRate = parseFloat($('rate').value);
+  const dur = json.duration || 0;
+  const hasAudio = !!audioBlob;
+  let audio = null;
+  if (hasAudio){
+    audio = new Audio();
+    audio.src = URL.createObjectURL(audioBlob);
+    audio.playbackRate = parseFloat($('rate').value);
+  }
   play = {
     audio,
+    hasAudio,
     states: json.states || [],
     cursor: json.cursor || [],
     clicks: json.clicks || [],
     fileSwitches: json.fileSwitches || [],
     clickIdx: 0, lastKey: '',
     meta: json.viewport || { w: viewer.clientWidth, h: viewer.clientHeight },
-    dur: json.duration || 0, active: false
+    dur, active: false,
+    // 无音频时用计时器模拟 currentTime
+    _timerStart: 0, _timerBase: 0
   };
-  audio.addEventListener('loadedmetadata', () => {
-    const dur = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (json.duration || 0);
+  if (hasAudio){
+    audio.addEventListener('loadedmetadata', () => {
+      const d = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : dur;
+      $('seek').max = Math.max(1, Math.round(d * 100));
+      $('seek').disabled = false; $('rate').disabled = false;
+      $('time').textContent = '0:00 / ' + fmtTime(d);
+    });
+    audio.addEventListener('ended', () => { play.active = false; $('btnPlay').textContent = '▶ 重播'; });
+  } else {
     $('seek').max = Math.max(1, Math.round(dur * 100));
     $('seek').disabled = false; $('rate').disabled = false;
     $('time').textContent = '0:00 / ' + fmtTime(dur);
-  });
-  audio.addEventListener('ended', () => { play.active = false; $('btnPlay').textContent = '▶ 重播'; });
+  }
   $('btnPlay').disabled = false;
-  const initDur = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (json.duration || 0);
-  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样，' + files.length + ' 个文件 → 按 ▶ 播放');
+  const initDur = (hasAudio && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : dur;
+  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样，' + files.length + ' 个文件' + (hasAudio ? '' : '（无音频）') + ' → 按 ▶ 播放');
+}
+function getPlayTimeMs(){
+  if (!play) return 0;
+  if (play.hasAudio) return play.audio.currentTime * 1000;
+  // 无音频：用计时器
+  const elapsed = (performance.now() - play._timerStart) / 1000 * parseFloat($('rate').value);
+  return Math.min((play._timerBase + elapsed) * 1000, play.dur * 1000);
 }
 $('btnPlay').addEventListener('click', () => {
   if (!play) return;
   if (play.active){
-    play.audio.pause(); play.active = false; $('btnPlay').textContent = '▶ 播放';
+    if (play.hasAudio) play.audio.pause();
+    play.active = false; $('btnPlay').textContent = '▶ 播放';
   } else {
-    play.audio.play().then(() => { play.active = true; $('btnPlay').textContent = '⏸ 暂停'; })
-      .catch(err => status('播放失败：' + err.message));
+    if (play.hasAudio){
+      play.audio.play().then(() => { play.active = true; $('btnPlay').textContent = '⏸ 暂停'; })
+        .catch(err => status('播放失败：' + err.message));
+    } else {
+      // 无音频：启动计时器
+      const cur = getPlayTimeMs() / 1000;
+      if (cur >= play.dur) { play._timerBase = 0; } else { play._timerBase = cur; }
+      play._timerStart = performance.now();
+      play.active = true; $('btnPlay').textContent = '⏸ 暂停';
+    }
   }
 });
 $('seek').addEventListener('input', e => {
   if (!play) return;
-  play.audio.currentTime = e.target.value / 100;
-  const t = play.audio.currentTime * 1000;
+  const t = e.target.value / 100;
+  if (play.hasAudio){
+    play.audio.currentTime = t;
+  } else {
+    play._timerBase = t; play._timerStart = performance.now();
+  }
+  const tMs = t * 1000;
   play.clickIdx = 0;
-  for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= t) play.clickIdx++; }
+  for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= tMs) play.clickIdx++; }
   play.lastKey = '';
   // 重新定位到播放位置对应的文件
-  const fi = getFileIndexAt(t);
+  const fi = getFileIndexAt(tMs);
   if (fi !== currentFileIndex){
     setActiveFile(fi);
   }
@@ -1189,10 +1252,12 @@ function applyCursor(t){
   const cs = play.cursor;
   if (!cs.length){ $('cursor').style.display = 'none'; return; }
   const el = $('cursor');
-  el.style.display = 'block';
   let i = upperBound(cs, t) - 1;
   if (i < 0) i = 0;
   const p = cs[i];
+  // 距离最近光标采样超过 1.5 秒则隐藏（模拟"人手离开"）
+  if (t - p.t > 1500){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
   // p.x/y 是相对内容元素的比例 (0~1), 乘以当前内容尺寸得到像素, 再转到 #stage 坐标系
   const cr = getContentRect();
   const sr = stage.getBoundingClientRect();
@@ -1215,12 +1280,16 @@ function runClicks(t){
 }
 function tick(){
   if (play && play.active){
-    const t = play.audio.currentTime * 1000;
+    const t = getPlayTimeMs();
+    // 无音频模式到达末尾自动停止
+    if (!play.hasAudio && t >= play.dur * 1000){
+      play.active = false; $('btnPlay').textContent = '▶ 重播';
+    }
     applyState(t); applyCursor(t); runClicks(t);
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
     const dur = play.dur || 0;
-    $('time').textContent = fmtTime(play.audio.currentTime) + ' / ' + fmtTime(dur);
+    $('time').textContent = fmtTime(t / 1000) + ' / ' + fmtTime(dur);
   }
   requestAnimationFrame(tick);
 }
@@ -1243,11 +1312,14 @@ function setMode(m){
 $('modeRec').addEventListener('click', () => setMode('rec'));
 $('modePlay').addEventListener('click', () => setMode('play'));
 
-/* ---------- 自动生成文稿 ---------- */
+/* ---------- 自动生成文稿（带时间轴）---------- */
 const scriptPanel = $('scriptPanel');
 const scriptBody = $('scriptPanel-body');
 const scriptTextarea = $('scriptPanel-edit').querySelector('textarea');
 let lastGeneratedScript = '';
+let scriptTimeline = [];   // [{text, anchor, startMs, endMs}]
+let recordingScript = false;
+let scriptRecAbort = false;
 
 // 从当前加载的文档提取可用于生成文稿的文本
 function getDocText(){
@@ -1266,7 +1338,63 @@ function getCurrentScript(){
   return lastGeneratedScript;
 }
 
-// 流式生成文稿（SSE）
+// 在 doc.textContent 中定位 anchor 的字符偏移 [a,b]
+function findAnchorOffset(anchor){
+  if (!anchor || !doc) return null;
+  const full = doc.textContent || '';
+  let idx = full.indexOf(anchor);
+  if (idx >= 0) return [idx, idx + anchor.length];
+  const snip = anchor.slice(0, 8);
+  idx = full.indexOf(snip);
+  if (idx >= 0) return [idx, idx + snip.length];
+  return null;
+}
+
+// 解析 NDJSON（清理 ```json 包裹，容错不完整行）
+function parseNDJSON(raw){
+  const clean = raw.replace(/```json/gi, '').replace(/```/g, '');
+  const result = [];
+  for (const line of clean.split('\n')){
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const obj = JSON.parse(t);
+      if (obj && typeof obj.text === 'string') result.push({ text: obj.text, anchor: obj.anchor || '' });
+    } catch(e){ /* 跳过不完整行 */ }
+  }
+  return result;
+}
+
+// 按字数估算每句时间戳（朗读语速 ~3.5 字/秒 → 280ms/字，每句至少 1.2 秒）
+function buildTimeline(lines){
+  const PER_CHAR = 280;
+  let t = 0;
+  scriptTimeline = [];
+  for (const line of lines){
+    const dur = Math.max(1200, line.text.length * PER_CHAR);
+    scriptTimeline.push({ text: line.text, anchor: line.anchor, startMs: t, endMs: t + dur });
+    t += dur;
+  }
+}
+
+// 渲染逐句时间轴列表
+function renderScriptTimeline(lines, streaming){
+  scriptBody.classList.remove('placeholder');
+  scriptBody.innerHTML = '';
+  let t = 0;
+  for (const line of lines){
+    const dur = Math.max(1200, line.text.length * 280);
+    const div = document.createElement('div');
+    div.className = 'script-line';
+    div.innerHTML = '<span class="script-t">' + fmtTime(t / 1000) + '</span><span class="script-s"></span>';
+    div.querySelector('.script-s').textContent = line.text;
+    scriptBody.appendChild(div);
+    t += dur;
+  }
+  if (streaming) scriptBody.scrollTop = scriptBody.scrollHeight;
+}
+
+// 流式生成带时间轴的文稿（NDJSON over SSE）
 async function autoGenerateScriptStream(){
   if (!source || !files.length){ status('请先加载文档'); return; }
   const text = getDocText().trim();
@@ -1277,19 +1405,16 @@ async function autoGenerateScriptStream(){
   const oldLabel = btn.textContent;
   btn.textContent = '生成中…';
 
-  // 显示面板
   scriptPanel.classList.remove('hidden');
   scriptPanel.classList.add('show');
-  // 收起状态也展开
   scriptPanel.classList.remove('collapsed');
-  // 退出编辑模式
   scriptPanel.classList.remove('edit-mode');
   scriptBody.classList.remove('placeholder');
-  scriptBody.textContent = '正在生成讲解稿，请稍候…';
+  scriptBody.innerHTML = '<span style="color:var(--dim2)">正在生成讲解稿，请稍候…</span>';
 
-  let fullText = '';
+  let rawAccum = '';
   try {
-    const resp = await fetch('/generate-script-stream', {
+    const resp = await fetch('/generate-script-timeline', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1298,10 +1423,7 @@ async function autoGenerateScriptStream(){
         length: 'medium'
       })
     });
-
-    if (!resp.ok){
-      throw new Error('HTTP ' + resp.status);
-    }
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -1310,67 +1432,49 @@ async function autoGenerateScriptStream(){
     while (true){
       const { done, value } = await reader.read();
       if (done) break;
-
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();  // 保留最后一个不完整的行
-
-      for (const line of lines){
-        const trimmed = line.trim();
+      const sseLines = buffer.split('\n');
+      buffer = sseLines.pop();
+      for (const sline of sseLines){
+        const trimmed = sline.trim();
         if (!trimmed.startsWith('data: ')) continue;
-        const jsonStr = trimmed.slice(6);
+        let chunk;
         try {
-          const chunk = JSON.parse(jsonStr);
-          if (chunk.delta){
-            fullText += chunk.delta;
-            scriptBody.textContent = fullText;
-            // 自动滚动到底部
-            scriptBody.scrollTop = scriptBody.scrollHeight;
-          } else if (chunk.done){
-            fullText = chunk.full;
-            scriptBody.textContent = fullText;
-            lastGeneratedScript = fullText;
-            status('讲解稿生成完成');
-          } else if (chunk.error){
-            throw new Error(chunk.error);
-          }
-        } catch (e){
-          // JSON 解析失败，跳过
-        }
+          chunk = JSON.parse(trimmed.slice(6));
+        } catch(e){ continue; }  // JSON 解析失败，跳过
+        if (chunk.delta){ rawAccum += chunk.delta; renderScriptTimeline(parseNDJSON(rawAccum), true); }
+        else if (chunk.error) throw new Error(chunk.error);
       }
     }
-
     // 处理剩余 buffer
-    if (buffer.trim()){
-      const trimmed = buffer.trim();
-      if (trimmed.startsWith('data: ')){
-        try {
-          const chunk = JSON.parse(trimmed.slice(6));
-          if (chunk.done){
-            fullText = chunk.full;
-            scriptBody.textContent = fullText;
-            lastGeneratedScript = fullText;
-          }
-        } catch (e){}
-      }
+    if (buffer.trim().startsWith('data: ')){
+      try {
+        const chunk = JSON.parse(buffer.trim().slice(6));
+        if (chunk.delta){ rawAccum += chunk.delta; }
+      } catch(e){}
     }
 
-    if (!lastGeneratedScript){
+    const lines = parseNDJSON(rawAccum);
+    renderScriptTimeline(lines, false);
+    buildTimeline(lines);
+    lastGeneratedScript = lines.map(l => l.text).join('\n');
+    $('scriptRecord').disabled = !scriptTimeline.length;
+    if (!scriptTimeline.length){
       scriptBody.classList.add('placeholder');
-      scriptBody.textContent = '生成完成但无输出';
+      scriptBody.innerHTML = '生成完成但无有效内容';
       status('生成完成但内容为空');
+    } else {
+      status('讲解稿生成完成：' + scriptTimeline.length + ' 句，约 ' + fmtTime(scriptTimeline[scriptTimeline.length-1].endMs / 1000));
     }
-
   } catch (e){
     scriptBody.classList.add('placeholder');
-    scriptBody.textContent = '生成失败: ' + e.message;
+    scriptBody.innerHTML = '生成失败: ' + e.message;
     status('生成失败: ' + e.message, true);
   } finally {
     btn.disabled = false;
     btn.textContent = oldLabel;
   }
 }
-
 // 按钮事件
 $('btnAutoScript').addEventListener('click', autoGenerateScriptStream);
 $('scriptRegen').addEventListener('click', autoGenerateScriptStream);
@@ -1401,9 +1505,11 @@ $('scriptEdit').addEventListener('click', () => {
 $('scriptSave').addEventListener('click', () => {
   scriptPanel.classList.remove('edit-mode');
   lastGeneratedScript = scriptTextarea.value;
-  scriptBody.textContent = lastGeneratedScript || '(空文稿)';
   scriptBody.classList.remove('placeholder');
-  status('文稿已保存');
+  scriptBody.textContent = lastGeneratedScript || '(空文稿)';
+  status('文稿已保存（已编辑文本，时间轴锚点可能失效，录制演讲已禁用）');
+  // 编辑后的纯文本无 anchor，禁用录制
+  $('scriptRecord').disabled = true;
 });
 
 // 复制
@@ -1417,6 +1523,253 @@ $('scriptCopy').addEventListener('click', async () => {
     status('复制失败，请手动选择文本复制', true);
   }
 });
+
+/* ---------- 录制演讲：按时间轴自动执行录制 ---------- */
+let ttsVoiceList = [];
+let ttsReady = false;
+
+// 初始化 Web Speech API 语音列表
+function initTtsVoices(){
+  if (!('speechSynthesis' in window)) return;
+  const sel = $('scriptTtsVoice');
+  function loadVoices(){
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    ttsVoiceList = voices;
+    sel.innerHTML = '';
+    // 优先中文语音
+    const zh = voices.filter(v => /zh|chinese|中文/i.test(v.lang) || /zh|chinese|中文/i.test(v.name));
+    const others = voices.filter(v => !zh.includes(v));
+    for (const v of [...zh, ...others]){
+      const opt = document.createElement('option');
+      opt.value = voices.indexOf(v);
+      opt.textContent = v.name + (v.lang ? ' (' + v.lang + ')' : '');
+      sel.appendChild(opt);
+    }
+    // 默认选第一个中文语音
+    const idx = zh.length ? voices.indexOf(zh[0]) : 0;
+    sel.value = idx;
+    ttsReady = true;
+  }
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+initTtsVoices();
+
+// 语速滑块实时显示
+$('scriptTtsRate').addEventListener('input', e => {
+  $('scriptTtsRateVal').textContent = parseFloat(e.target.value).toFixed(1) + '×';
+});
+
+// 用 TTS 朗读单句，返回 Promise（读完 resolve，拿到实际耗时）
+function speakSentence(text, rate){
+  return new Promise(resolve => {
+    if (!ttsReady || !('speechSynthesis' in window)){ resolve({ dur: text.length * 280, canceled: false }); return; }
+    // 取消上一句
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const sel = $('scriptTtsVoice');
+    const vi = parseInt(sel.value);
+    if (!isNaN(vi) && ttsVoiceList[vi]) u.voice = ttsVoiceList[vi];
+    u.rate = rate;
+    u.lang = (ttsVoiceList[vi] && ttsVoiceList[vi].lang) || 'zh-CN';
+    const st0 = performance.now();
+    let realDur = 0;
+    u.onend = () => { realDur = performance.now() - st0; resolve({ dur: realDur, canceled: false }); };
+    u.onerror = () => { realDur = performance.now() - st0; resolve({ dur: Math.max(1500, realDur), canceled: false }); };
+    speechSynthesis.speak(u);
+  });
+}
+
+function stopTts(){ if ('speechSynthesis' in window) speechSynthesis.cancel(); }
+
+async function recordSpeech(){
+  if (recordingScript || !scriptTimeline.length) return;
+  if (!source){ status('请先加载文档'); return; }
+
+  const useTts = $('scriptTtsEnabled').checked && ttsReady;
+  if (!useTts){ status('请勾选「语音」开关再录制演讲'); return; }
+  const rate = parseFloat($('scriptTtsRate').value) || 1;
+
+  // ── 捕获标签页音频（TTS 朗读声），需要用户授权共享此标签页 ──
+  let audioStream = null;
+  try {
+    audioStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,            // Chrome 要求 video:true 才能捕获标签页音频
+      audio: {                // 强制捕获系统/标签页音频
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      }
+    });
+    // 如果用户没勾选"分享标签页音频"，提示
+    if (!audioStream.getAudioTracks().length){
+      audioStream.getTracks().forEach(t => t.stop());
+      status('请勾选"分享标签页音频"（分享标签页时务必勾选音频）');
+      return;
+    }
+    // 停掉视频轨道（只需要音频）
+    audioStream.getVideoTracks().forEach(t => t.stop());
+  } catch (err){
+    status('需要授权共享标签页才能录制 TTS 音频：' + err.message);
+    return;
+  }
+
+  recordingScript = true;
+  const btn = $('scriptRecord');
+  btn.disabled = true;
+  btn.textContent = '录制中…';
+  $('btnExport').disabled = true;
+  $('btnShare').disabled = true;
+  $('scriptRegen').disabled = true;
+
+  // ── 启动 MediaRecorder 录制音频 ──
+  const mime = pickAudioMime();
+  const audioTracks = audioStream.getAudioTracks();
+  const audioOnlyStream = new MediaStream(audioTracks);
+  const rec = new MediaRecorder(audioOnlyStream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined);
+  const audioChunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
+  const st0 = performance.now();
+  rec.start(1000);
+
+  // ── 同步进入"录制中" UI 状态（和手动录制一致）──
+  $('btnStart').disabled = true;
+  $('btnStop').disabled = false;
+  $('srcPick').disabled = true;
+  timerIv = setInterval(() => {
+    $('recTimer').innerHTML = '<span class="rec-dot"></span>' + fmtTime((performance.now() - st0) / 1000);
+  }, 250);
+
+  const states = [], cursor = [], clicks = [], fileSwitches = [];
+  let cursorShowUntil = 0;
+  let elapsedMs = 0;
+  scriptRecAbort = false;
+
+  if (selLayer) selLayer.innerHTML = '';
+  $('cursor').style.display = 'none';
+
+  const lineEls = () => scriptBody.querySelectorAll('.script-line');
+
+  status('录制演讲中…自动操作 ' + scriptTimeline.length + ' 句（语音朗读 + 录音）');
+
+  for (let si = 0; si < scriptTimeline.length; si++){
+    if (scriptRecAbort) break;
+    const item = scriptTimeline[si];
+    const startT = elapsedMs;
+    item.startMs = startT;
+
+    const els = lineEls();
+    els.forEach((el, i) => el.classList.toggle('active', i === si));
+    if (els[si]) els[si].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    const curEl = $('cursor');
+    const off = findAnchorOffset(item.anchor);
+    if (off){
+      const r = offsetsToRange(off[0], off[1]);
+      if (r){
+        // 真正把选区设到 anchor 对应文本上（这样 pushScriptState 能记录到 s）
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+
+        const cr = getContentRect();
+        const lineTop = r.getBoundingClientRect().top;
+        const targetScroll = viewer.scrollTop + (lineTop - cr.top) - viewer.clientHeight * 0.3;
+        viewer.scrollTop = Math.max(0, targetScroll);
+
+        const cr2 = getContentRect();
+        const sr = stage.getBoundingClientRect();
+        const cx = 0.5, cy = 0.3;
+        cursor.push({ t: startT, x: cx, y: cy });
+        clicks.push({ t: startT, x: cx, y: cy });
+        curEl.style.display = 'block';
+        curEl.style.left = (cx * cr2.width + cr2.left - sr.left) + 'px';
+        curEl.style.top = (cy * cr2.height + cr2.top - sr.top) + 'px';
+        cursorShowUntil = startT + 700;
+      }
+    }
+
+    pushScriptState(states, startT);
+
+    const res = await speakSentence(item.text, rate);
+    if (scriptRecAbort) break;
+    const sentenceDur = res.dur;
+    pushScriptState(states, startT + sentenceDur);
+    if (startT + sentenceDur > cursorShowUntil) curEl.style.display = 'none';
+
+    elapsedMs += sentenceDur;
+    item.endMs = elapsedMs;
+  }
+
+  // ── 停止录制 ──
+  await new Promise(resolve => {
+    rec.onstop = () => resolve();
+    try { rec.stop(); } catch(e){ resolve(); }
+  });
+  audioStream.getTracks().forEach(t => t.stop());
+
+  // 清理临时标记
+  scriptBody.querySelectorAll('.script-line').forEach(el => el.classList.remove('active'));
+  $('cursor').style.display = 'none';
+  if (selLayer) selLayer.innerHTML = '';
+  window.getSelection().removeAllRanges();
+  stopTts();
+
+  const totalDur = elapsedMs;
+  const audioBlob = new Blob(audioChunks, { type: rec.mimeType || 'audio/webm' });
+
+  const json = {
+    v: 2, app: 'LectureLite', created: new Date().toISOString(),
+    duration: totalDur / 1000,
+    viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+    file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
+    files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+    fileSwitches,
+    states, cursor, clicks,
+    script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs })),
+    note: 'auto-generated timeline, chrome TTS, audio captured'
+  };
+
+  recState = { audioBlob, json, finished: true };
+  $('btnExport').disabled = false;
+  $('btnShare').disabled = false;  // 有音频了，可以分享
+  btn.disabled = false;
+  btn.textContent = '录制演讲';
+  $('scriptRegen').disabled = false;
+  recordingScript = false;
+
+  // ── 恢复"录制" UI 为结束态（和手动停止一致）──
+  clearInterval(timerIv);
+  $('btnStop').disabled = true;
+  $('btnStart').disabled = false;
+  $('srcPick').disabled = false;
+  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(totalDur / 1000);
+
+  const audioSize = (audioBlob.size / 1048576).toFixed(1);
+  status('录制演讲完成：' + fmtTime(totalDur / 1000) + '，音频 ' + audioSize + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
+}
+
+// 记录当前滚动+选区状态
+function pushScriptState(states, t){
+  const maxScroll = viewer.scrollHeight - viewer.clientHeight;
+  const sr = maxScroll > 0 ? viewer.scrollTop / maxScroll : 0;
+  let sel = null;
+  if (source && source.type === 'md'){
+    const sel_ = window.getSelection();
+    if (sel_ && !sel_.isCollapsed && sel_.rangeCount && doc.contains(sel_.getRangeAt(0).commonAncestorContainer)){
+      const r = sel_.getRangeAt(0);
+      const o = rangeToOffsets(r);
+      if (o[1] > o[0]) sel = { a: o[0], b: o[1] };
+    }
+  }
+  const key = Math.round(sr * 1000) + '|' + (sel ? sel.a + ',' + sel.b : '');
+  if (states.length === 0 || states[states.length - 1]._k !== key){
+    states.push({ t: Math.round(t), sr: Math.round(sr * 10000) / 10000, y: Math.round(viewer.scrollTop), s: sel, _k: key });
+  }
+}
+
+$('scriptRecord').addEventListener('click', recordSpeech);
 
 function showHelp(){ $('intro').classList.add('show'); }
 function hideHelp(){ $('intro').classList.remove('show'); }

@@ -9,9 +9,11 @@ from pathlib import Path
 try:
     from llm.script_generator import generate_script as _gen_script
     from llm.script_generator import generate_script_stream as _gen_script_stream
+    from llm.script_generator import generate_script_timeline_stream as _gen_script_timeline_stream
 except ImportError:
     _gen_script = None
     _gen_script_stream = None
+    _gen_script_timeline_stream = None
 
 PORT = 8663
 WEB_DIR = Path(__file__).parent.resolve()
@@ -99,6 +101,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_generate_script()
         elif self.path == "/generate-script-stream":
             self._handle_generate_script_stream()
+        elif self.path == "/generate-script-timeline":
+            self._handle_generate_script_timeline()
         else:
             self._send(404, b"Not Found", "text/plain")
             return
@@ -228,6 +232,52 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    # ── /generate-script-timeline（流式 NDJSON 透传）──
+    def _handle_generate_script_timeline(self):
+        if not _gen_script_timeline_stream:
+            self._send_json(503, {"error": "llm.script_generator 未找到"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+
+            content = data.get("content", "")
+            topic = data.get("topic", "")
+            length = data.get("length", "medium")
+
+            if not content:
+                self._send_json(400, {"error": "缺少文档内容"})
+                return
+
+            # SSE 流式响应，透传模型原始输出
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self._cors()
+            self.end_headers()
+
+            for piece in _gen_script_timeline_stream(content, topic, length):
+                sse_data = json.dumps({"delta": piece}, ensure_ascii=False)
+                chunk = f"data: {sse_data}\n\n".encode("utf-8")
+                self.wfile.write(chunk)
+                self.wfile.flush()
+
+            end_chunk = b"data: {\"done\":true}\n\n"
+            self.wfile.write(end_chunk)
+            self.wfile.flush()
+            self.close_connection = True
+
+        except Exception as e:
+            error_data = json.dumps({"error": str(e)}, ensure_ascii=False)
+            error_chunk = f"data: {error_data}\n\n".encode("utf-8")
+            try:
+                self.wfile.write(error_chunk)
+                self.wfile.flush()
+            except Exception:
+                pass
 
     # ── multipart helpers ──
 
