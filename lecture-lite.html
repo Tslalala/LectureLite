@@ -7,6 +7,15 @@
 <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<link rel="stylesheet" href="tools/annotations.css">
+<script src="tools/tool-registry.js"></script>
+<script src="tools/highlight.js"></script>
+<script src="tools/underline.js"></script>
+<script src="tools/strike.js"></script>
+<script src="tools/comment.js"></script>
+<script src="tools/question.js"></script>
+<script src="tools/sticker.js"></script>
+<script src="tools/selection-toolbar.js"></script>
 <style>
 :root{
   --bg:#FAFAF8; --surface:#FFFFFF; --surface2:#F4F4F1;
@@ -342,6 +351,9 @@ let pendingPlay = null;
 let lastLoadedZipBlob = null;  // 用于播放栏分享
 let lastLoadedZipName = '';
 let timerIv = null;
+let annotations = [];   // [{t,type,fi,offsets|coords,text?,icon?}]
+let annotationPopupEvents = []; // [{t,id,fi,open}] 批注气泡显隐时间轴
+let annotationTools = null;
 
 const md = window.markdownit ? markdownit({ html:true, linkify:true, breaks:false }) : null;
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
@@ -382,6 +394,7 @@ function updateTabs(){
 async function switchToFile(fi){
   if (fi < 0 || fi >= files.length) return;
   const isChange = fi !== currentFileIndex;
+  if (isChange && annotationTools) annotationTools.closeAllComments(mode === 'rec');
   // 记录切换时间戳（录制中，且确实切换了）
   if (recState && isChange){
     recState.fileSwitches.push({ t: Math.round(performance.now() - recState.st0), fi: fi });
@@ -425,6 +438,14 @@ function closeTab(fi){
   // 释放 blob URL
   URL.revokeObjectURL(files[fi].blob && files[fi].blob._url);
   files.splice(fi, 1);
+  // 标注绑定文件序号：删除当前文件的标注，并同步后续文件序号
+  annotations = annotations
+    .filter(annotation => annotation.fi !== fi)
+    .map(annotation => annotation.fi > fi ? { ...annotation, fi: annotation.fi - 1 } : annotation);
+  annotationPopupEvents = annotationPopupEvents
+    .filter(event => event.fi !== fi)
+    .map(event => event.fi > fi ? { ...event, fi: event.fi - 1 } : event);
+  if (annotationTools) annotationTools.setAnnotations(annotations);
   // 调整 currentFileIndex
   if (currentFileIndex >= files.length) currentFileIndex = files.length - 1;
   if (currentFileIndex === fi){
@@ -434,6 +455,7 @@ function closeTab(fi){
     if (currentFileIndex > fi) currentFileIndex--;
     updateTabs();
   }
+  renderAnnotations();
 }
 
 // 添加文件（选择文件或文件夹后追加新文件）
@@ -468,6 +490,9 @@ async function handleFileInput(e, appendMode){
     await switchToFile(currentFileIndex);
   } else {
     // 覆盖模式：清空旧文件列表，只保留这个
+    annotations = [];
+    annotationPopupEvents = [];
+    if (annotationTools) annotationTools.setAnnotations(annotations);
     files = [{ name: mdFile.name, blob: mdFile, mime: /\.pdf$/i.test(mdFile.name) ? 'application/pdf' : 'text/markdown', type: /\.pdf$/i.test(mdFile.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] }];
     currentFileIndex = 0;
     if (recState && !recState.finished) stopRec();
@@ -495,6 +520,9 @@ async function handleDirInput(e){
   if (recState && !recState.finished) stopRec();
   recState = null;
   $('btnExport').disabled = true;
+  annotations = [];
+  annotationPopupEvents = [];
+  if (annotationTools) annotationTools.setAnnotations(annotations);
 
   files = [];
   for (const f of allDocFiles){
@@ -568,6 +596,31 @@ function restoreSelection(offsets){
     d.style.height = rc.height + 'px';
     selLayer.appendChild(d);
   }
+}
+
+function annotationTimeForView(){
+  if (mode !== 'play') return null;
+  return play ? getPlayTimeMs() : 0;
+}
+
+function renderAnnotations(time){
+  if (!annotationTools) return;
+  const resolvedTime = time === undefined ? annotationTimeForView() : time;
+  annotationTools.render(resolvedTime);
+  const popupEvents = mode === 'play' && play ? play.annotationPopups : [];
+  annotationTools.applyPopupTimeline(popupEvents, resolvedTime == null ? 0 : resolvedTime);
+}
+
+function snapshotAnnotations(){
+  return annotations.map(annotation => ({
+    ...annotation,
+    offsets: annotation.offsets ? annotation.offsets.slice() : undefined,
+    coords: annotation.coords ? annotation.coords.map(rect => ({ ...rect })) : undefined
+  }));
+}
+
+function snapshotAnnotationPopups(){
+  return annotationPopupEvents.map(event => ({ ...event }));
 }
 
 /* ---------- source rendering (identical layout in record & play) ---------- */
@@ -667,6 +720,9 @@ async function renderSource(blob, name, imgFiles){
   
   // 生成目录
   updateToc();
+
+  // 文件切换和重渲染后，恢复该文件此刻应显示的标注
+  renderAnnotations();
   
   status('已加载 ' + name + '（' + (blob.size/1024).toFixed(0) + ' KB' + (imgFiles && imgFiles.length ? '，' + imgFiles.length + ' 张图片' : '') + '）');
 }
@@ -884,14 +940,16 @@ function stopRec(){
   // 同步组装导出数据 —— 不依赖 onstop 异步回调,确保停止后立即可导出
   const audioBlob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
   const json = {
-    v: 2, app: 'LectureLite', created: new Date().toISOString(),
+    v: 3, app: 'LectureLite', created: new Date().toISOString(),
     duration: (performance.now() - st0) / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
     // 兼容旧格式：若有多个文件用 files，否则保留 file
     file: { name: (files[currentFileIndex] || {}).name || source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
     files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
     fileSwitches,
-    states, cursor, clicks
+    states, cursor, clicks,
+    annotations: snapshotAnnotations(),
+    annotationPopups: snapshotAnnotationPopups()
   };
   recState = { audioBlob, json, finished: true };
 
@@ -901,7 +959,7 @@ function stopRec(){
   $('btnExport').disabled = false;
   $('btnShare').disabled = false;
   $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
-  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样，' + files.length + ' 个文件，' + fileSwitches.length + ' 次切换 → 可导出');
+  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + annotations.length + ' 个标注，' + files.length + ' 个文件，' + fileSwitches.length + ' 次切换 → 可导出');
 
   // onstop 异步回调只负责用更精确的时长刷新一次(可选),失败也不影响导出
   rec.onstop = async () => {
@@ -1022,6 +1080,9 @@ async function loadZip(file){
     }
     if (!json) throw new Error('zip 里找不到 .json 时间轴');
     const audioBlob = audioEntry ? await audioEntry.async('blob') : null;
+    annotations = Array.isArray(json.annotations) ? json.annotations : [];
+    annotationPopupEvents = Array.isArray(json.annotationPopups) ? json.annotationPopups : [];
+    if (annotationTools) annotationTools.setAnnotations(annotations);
 
     // 兼容旧格式：无 files 字段时用 file
     const fileMetaList = json.files && json.files.length ? json.files : [{ name: json.file && json.file.name, mime: json.file && json.file.mime }];
@@ -1099,6 +1160,8 @@ function startPlayback({ json, audioBlob }){
     cursor: json.cursor || [],
     clicks: json.clicks || [],
     fileSwitches: json.fileSwitches || [],
+    annotations: json.annotations || [],
+    annotationPopups: json.annotationPopups || [],
     clickIdx: 0, lastKey: '',
     meta: json.viewport || { w: viewer.clientWidth, h: viewer.clientHeight },
     dur, active: false,
@@ -1119,12 +1182,14 @@ function startPlayback({ json, audioBlob }){
     $('time').textContent = '0:00 / ' + fmtTime(dur);
   }
   $('btnPlay').disabled = false;
+  renderAnnotations(0);
   const initDur = (hasAudio && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : dur;
-  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.cursor.length + ' 个光标采样，' + files.length + ' 个文件' + (hasAudio ? '' : '（无音频）') + ' → 按 ▶ 播放');
+  status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.annotations.length + ' 个标注，' + files.length + ' 个文件' + (hasAudio ? '' : '（无音频）') + ' → 按 ▶ 播放');
 }
 function getPlayTimeMs(){
   if (!play) return 0;
   if (play.hasAudio) return play.audio.currentTime * 1000;
+  if (!play.active) return play._timerBase * 1000;
   // 无音频：用计时器
   const elapsed = (performance.now() - play._timerStart) / 1000 * parseFloat($('rate').value);
   return Math.min((play._timerBase + elapsed) * 1000, play.dur * 1000);
@@ -1133,6 +1198,7 @@ $('btnPlay').addEventListener('click', () => {
   if (!play) return;
   if (play.active){
     if (play.hasAudio) play.audio.pause();
+    else play._timerBase = getPlayTimeMs() / 1000;
     play.active = false; $('btnPlay').textContent = '▶ 播放';
   } else {
     if (play.hasAudio){
@@ -1164,6 +1230,7 @@ $('seek').addEventListener('input', e => {
   if (fi !== currentFileIndex){
     setActiveFile(fi);
   }
+  renderAnnotations(tMs);
 });
 $('rate').addEventListener('change', e => { if (play) play.audio.playbackRate = parseFloat(e.target.value); });
 
@@ -1180,6 +1247,7 @@ function getFileIndexAt(t){
 // 播放时切换激活文件（不记录，不触发录音）
 async function setActiveFile(fi){
   if (fi < 0 || fi >= files.length) return;
+  if (fi !== currentFileIndex && annotationTools) annotationTools.closeAllComments(false);
   // 播放时切换文件：保存旧文件状态（可选，因为播放时 applyState 会恢复 scrollTop）
   let savedSelOffsets = null;
   if (currentFileIndex >= 0 && files[currentFileIndex]){
@@ -1283,9 +1351,10 @@ function tick(){
     const t = getPlayTimeMs();
     // 无音频模式到达末尾自动停止
     if (!play.hasAudio && t >= play.dur * 1000){
+      play._timerBase = play.dur;
       play.active = false; $('btnPlay').textContent = '▶ 重播';
     }
-    applyState(t); applyCursor(t); runClicks(t);
+    applyState(t); applyCursor(t); runClicks(t); renderAnnotations(t);
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
     const dur = play.dur || 0;
@@ -1295,6 +1364,12 @@ function tick(){
 }
 window.addEventListener('resize', () => { if (play) play.lastKey = ''; });
 document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z'
+      && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)
+      && annotationTools && annotationTools.undo()){
+    e.preventDefault();
+    return;
+  }
   if (e.code === 'Space' && play && mode === 'play' && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)){
     e.preventDefault();
     $('btnPlay').click();
@@ -1304,10 +1379,12 @@ document.addEventListener('keydown', e => {
 /* ---------- mode ---------- */
 function setMode(m){
   mode = m;
+  if (annotationTools) annotationTools.hide();
   $('recBar').classList.toggle('on', m === 'rec');
   $('playBar').classList.toggle('on', m === 'play');
   $('modeRec').classList.toggle('primary', m === 'rec');
   $('modePlay').classList.toggle('primary', m === 'play');
+  renderAnnotations();
 }
 $('modeRec').addEventListener('click', () => setMode('rec'));
 $('modePlay').addEventListener('click', () => setMode('play'));
@@ -1720,13 +1797,15 @@ async function recordSpeech(){
   const audioBlob = new Blob(audioChunks, { type: rec.mimeType || 'audio/webm' });
 
   const json = {
-    v: 2, app: 'LectureLite', created: new Date().toISOString(),
+    v: 3, app: 'LectureLite', created: new Date().toISOString(),
     duration: totalDur / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
     file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
     files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
     fileSwitches,
     states, cursor, clicks,
+    annotations: snapshotAnnotations(),
+    annotationPopups: snapshotAnnotationPopups(),
     script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs })),
     note: 'auto-generated timeline, chrome TTS, audio captured'
   };
@@ -1776,6 +1855,52 @@ function hideHelp(){ $('intro').classList.remove('show'); }
 $('helpBtn').addEventListener('click', showHelp);
 $('introOk').addEventListener('click', hideHelp);
 $('intro').addEventListener('click', hideHelp); // 点遮罩关闭
+
+/* ---------- contextual annotation tools ---------- */
+if (window.LectureLiteAnnotationTools){
+  annotationTools = window.LectureLiteAnnotationTools.create({
+    doc,
+    viewer,
+    getMode: () => mode,
+    getFileIndex: () => currentFileIndex,
+    getSourceType: () => source ? source.type : '',
+    getTimestamp: () => recState && !recState.finished && recState.st0
+      ? performance.now() - recState.st0
+      : 0,
+    getPlaybackTime: annotationTimeForView,
+    rangeToOffsets,
+    offsetsToRange,
+    onCreate(annotation, tool){
+      annotations.push(annotation);
+      annotationTools.setAnnotations(annotations);
+      renderAnnotations();
+      // 录制停止后仍新增标注时，同步到待导出的 JSON。
+      if (recState && recState.finished && recState.json){
+        recState.json.annotations = snapshotAnnotations();
+      }
+      status('已添加' + tool.label + (recState && !recState.finished ? '并记录到时间轴' : ''));
+    },
+    onUpdate(annotation, change){
+      annotationTools.setAnnotations(annotations);
+      renderAnnotations();
+      if (recState && recState.finished && recState.json){
+        recState.json.annotations = snapshotAnnotations();
+      }
+      status(change === 'restore' ? '已撤回删除' : '已删除标注');
+    },
+    onPopupChange(id, open){
+      if (!recState || recState.finished || !recState.st0) return;
+      annotationPopupEvents.push({
+        t: Math.max(0, Math.round(performance.now() - recState.st0)),
+        id,
+        fi: currentFileIndex,
+        open: !!open
+      });
+    }
+  });
+  annotationTools.setAnnotations(annotations);
+  window.lectureLiteAnnotations = annotationTools;
+}
 
 // 从 URL 参数自动加载 zip (局域网分享)
 (function(){
