@@ -23,6 +23,8 @@
   --fg:#1a1a1a; --dim:#6B6B67; --dim2:#969692;
   --acc:#1a1a1a; --acc2:#3a3a3a;
   --rec:#c4423a;
+  /* 字幕：默认透明度 0.72（比原 0.88 更低），默认字号 16px（比原 14.5px 大一号） */
+  --cc-alpha:.72; --cc-fs:16px;
 }
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
@@ -215,6 +217,26 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #cursor{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
   background:#e8362f; border:2px solid #fff; pointer-events:none; z-index:9; display:none;
   box-shadow:0 0 0 3px rgba(232,54,47,.25),0 0 12px rgba(232,54,47,.7); }
+
+/* —— 字幕（AI 讲稿） —— 透明度/字号由 --cc-alpha / --cc-fs 控制，可在字幕条上调节 */
+#ccBar{ position:absolute; left:50%; transform:translateX(-50%); bottom:14px; z-index:11;
+  max-width:76%; min-width:180px; background:rgba(26,26,24,var(--cc-alpha)); color:#f0f0ee;
+  border-radius:10px; padding:7px 12px 9px; box-shadow:0 4px 18px rgba(0,0,0,.35);
+  backdrop-filter:blur(4px); }
+#ccBar.hidden{ display:none; }
+#ccHead{ display:flex; align-items:center; gap:10px; font-size:11px; color:#9a9a92; user-select:none; }
+#ccLabel{ font-weight:700; letter-spacing:1px; color:#d8d8d2; }
+#ccGear, #ccClose{ cursor:pointer; padding:0 3px; border-radius:3px; }
+#ccGear:hover, #ccClose:hover{ color:#fff; background:rgba(255,255,255,.12); }
+#ccSettings{ display:flex; flex-direction:column; gap:5px; margin-top:7px;
+  padding:8px 10px 6px; background:rgba(255,255,255,.07); border-radius:8px; }
+#ccSettings label{ display:flex; align-items:center; gap:8px; font-size:11px; color:#c9c9c3; white-space:nowrap; }
+#ccSettings input[type=range]{ flex:1; height:3px; accent-color:#e8362f; cursor:pointer; }
+#ccSettings .cc-val{ min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+#ccText{ margin-top:5px; font-size:var(--cc-fs); line-height:1.6; pointer-events:none; }
+#ccBtn{ font-weight:700; letter-spacing:.5px; }
+#ccBtn.off{ opacity:.4; }
+@keyframes ccFade{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
 .ripple{ position:absolute; width:32px; height:32px; margin:-16px 0 0 -16px; border-radius:50%;
   border:2px solid #e8362f; pointer-events:none; z-index:8; animation:rip .5s ease-out forwards; }
 @keyframes rip{ from{ transform:scale(.3); opacity:.7; } to{ transform:scale(1.5); opacity:0; } }
@@ -277,6 +299,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
     <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,image/*" multiple class="hidden">
     <button id="btnPlay" disabled>播放</button>
     <button id="btnSharePlay" disabled>分享</button>
+    <button id="ccBtn" title="AI 讲稿字幕开关" hidden disabled>字幕</button>
     <input type="range" id="seek" min="0" max="1000" step="1" value="0" disabled>
     <span id="time">–:––</span>
     <select id="rate" disabled>
@@ -296,6 +319,18 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
       <aside id="toc"><div id="toc-title">目录</div></aside>
       <div id="viewer"><div id="doc"></div></div>
       <div id="cursor"></div>
+      <div id="ccBar" class="hidden">
+        <div id="ccHead">
+          <span id="ccLabel">字幕</span>
+          <span id="ccGear" title="字幕设置">⚙</span>
+          <span id="ccClose" title="关闭字幕">✕</span>
+        </div>
+        <div id="ccSettings" class="hidden">
+          <label>透明度<input type="range" id="ccOpacity" min="20" max="100" step="5"><span class="cc-val" id="ccOpacityVal"></span></label>
+          <label>字号<input type="range" id="ccFontSize" min="12" max="28" step="1"><span class="cc-val" id="ccFontSizeVal"></span></label>
+        </div>
+        <div id="ccText"></div>
+      </div>
     </div>
     <div id="scriptPanel" class="hidden">
       <div id="scriptPanel-header">
@@ -306,8 +341,15 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
         <div id="scriptPanel-body" class="placeholder">点击「✨ 自动生成文稿」从当前文档生成讲解稿。</div>
         <div id="scriptPanel-edit"><textarea placeholder="在此编辑文稿…"></textarea></div>
         <div id="scriptTtsRow">
-          <label title="使用浏览器语音合成朗读文稿"><input type="checkbox" id="scriptTtsEnabled" checked>语音</label>
-          <select id="scriptTtsVoice" title="选择语音"></select>
+          <label title="生成时朗读文稿；不勾选则生成无语音的时间轴包"><input type="checkbox" id="scriptTtsEnabled" checked>语音</label>
+          <select id="scriptEdgeVoice" title="在线语音合成声音（微软 edge-tts，需联网）">
+            <option value="zh-CN-XiaoxiaoNeural">晓晓（女·普通话）</option>
+            <option value="zh-CN-YunxiNeural">云希（男·普通话）</option>
+            <option value="zh-CN-YunjianNeural">云健（男·浑厚）</option>
+            <option value="zh-CN-XiaoyiNeural">晓伊（女·温柔）</option>
+            <option value="zh-CN-YunyangNeural">云扬（男·新闻播报）</option>
+          </select>
+          <select id="scriptTtsVoice" title="浏览器本地语音（仅回退录制时使用）" style="display:none"></select>
           <label>语速<input type="range" id="scriptTtsRate" min="0.5" max="2" step="0.1" value="1"></label>
           <span id="scriptTtsRateVal" style="color:var(--dim);min-width:24px">1.0×</span>
         </div>
@@ -316,7 +358,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
           <button id="scriptSave" class="primary">保存</button>
           <button id="scriptCopy">复制</button>
           <button id="scriptRegen">重新生成</button>
-          <button id="scriptRecord" disabled title="按时间轴自动执行录制，不录音频">录制演讲</button>
+          <button id="scriptRecord" disabled title="在线合成语音，一键直接生成（失败时回退为浏览器实时录制）">录制演讲</button>
         </div>
       </div>
     </div>
@@ -363,6 +405,7 @@ function fmtTime(s){ s = Math.max(0, s|0); return (s/60|0) + ':' + String(s%60).
 function throttle(fn, ms){ let last = 0; return function(a){ const n = performance.now(); if (n - last < ms) return; last = n; fn(a); }; }
 function upperBound(arr, t){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m].t <= t) lo = m + 1; else hi = m; } return lo; }
 function baseName(n){ return n.replace(/\.[^.]+$/, ''); }
+const CURSOR_PREC = 10000;   // 光标比例坐标精度（录制/生成/回放共用）
 
 /* ---------- tab bar management ---------- */
 const tabBar = $('tabbar'), tabsEl = $('tabs');
@@ -997,7 +1040,7 @@ async function exportZip(){
   let audioNote = '';
   if (audioBlob){
     const ty = audioBlob.type || 'audio/webm';
-    const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
+    const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : ty.includes('wav') ? 'wav' : ty.includes('mpeg') ? 'mp3' : 'webm';
     zip.file('audio.' + ext, audioBlob);
     audioNote = '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB';
   }
@@ -1044,7 +1087,7 @@ $('btnShare').addEventListener('click', async () => {
     }
   }
   const ty = audioBlob.type || 'audio/webm';
-  const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : 'webm';
+  const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : ty.includes('wav') ? 'wav' : ty.includes('mpeg') ? 'mp3' : 'webm';
   zip.file('audio.' + ext, audioBlob);
   zip.file('lecture.json', JSON.stringify(json));
   const zipBlob = await zip.generateAsync({ type: 'blob' });
@@ -1185,7 +1228,89 @@ function startPlayback({ json, audioBlob }){
   renderAnnotations(0);
   const initDur = (hasAudio && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : dur;
   status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.annotations.length + ' 个标注，' + files.length + ' 个文件' + (hasAudio ? '' : '（无音频）') + ' → 按 ▶ 播放');
+  setupSubtitle(json);
 }
+
+/* ---------- 字幕（AI 讲稿逐句显示，仅 AI 生成包有 script 字段） ---------- */
+let ccSentenceIdx = -1;
+
+function setupSubtitle(json){
+  ccSentenceIdx = -1;
+  const hasScript = !!(json.script && json.script.length);
+  const btn = $('ccBtn');
+  btn.hidden = !hasScript;
+  btn.disabled = !hasScript;
+  if (!hasScript){
+    $('ccBar').classList.add('hidden');
+    $('ccText').textContent = '';
+    return;
+  }
+  play.script = json.script;
+  // 恢复用户上次的开关偏好
+  applyCcState(localStorage.getItem('ccOn') !== '0');
+}
+
+function applyCcState(on){
+  const btn = $('ccBtn'), bar = $('ccBar');
+  btn.classList.toggle('off', !on);
+  bar.classList.toggle('hidden', !on);
+}
+
+// —— 字幕外观（透明度/字号），持久化到 localStorage ——
+const CC_DEFAULTS = { opacity: 72, fontSize: 16 };
+function loadCcStyle(){
+  try {
+    const s = JSON.parse(localStorage.getItem('ccStyle') || 'null');
+    if (s && typeof s.opacity === 'number' && typeof s.fontSize === 'number') return s;
+  } catch(e){}
+  return { ...CC_DEFAULTS };
+}
+function applyCcStyle(){
+  const s = loadCcStyle();
+  const op = Math.max(20, Math.min(100, Math.round(s.opacity)));
+  const fs = Math.max(12, Math.min(28, Math.round(s.fontSize)));
+  document.documentElement.style.setProperty('--cc-alpha', (op / 100).toFixed(2));
+  document.documentElement.style.setProperty('--cc-fs', fs + 'px');
+  $('ccOpacity').value = op;  $('ccOpacityVal').textContent = op + '%';
+  $('ccFontSize').value = fs; $('ccFontSizeVal').textContent = fs + 'px';
+}
+applyCcStyle();
+$('ccGear').addEventListener('click', () => $('ccSettings').classList.toggle('hidden'));
+$('ccOpacity').addEventListener('input', e => {
+  const s = loadCcStyle(); s.opacity = parseInt(e.target.value, 10);
+  localStorage.setItem('ccStyle', JSON.stringify(s));
+  applyCcStyle();
+});
+$('ccFontSize').addEventListener('input', e => {
+  const s = loadCcStyle(); s.fontSize = parseInt(e.target.value, 10);
+  localStorage.setItem('ccStyle', JSON.stringify(s));
+  applyCcStyle();
+});
+
+function updateSubtitle(tMs){
+  if (!play || !play.script || !play.script.length) return;
+  let i = upperBound(play.script, tMs) - 1;
+  if (i === ccSentenceIdx) return;
+  ccSentenceIdx = i;
+  const el = $('ccText');
+  if (i < 0){ el.textContent = ''; return; }
+  // 快速淡入，句间切换有轻微动效
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = 'ccFade .25s ease-out';
+  el.textContent = play.script[i].text || '';
+}
+
+$('ccBtn').addEventListener('click', () => {
+  const on = $('ccBar').classList.contains('hidden');
+  localStorage.setItem('ccOn', on ? '1' : '0');
+  applyCcState(on);
+  ccSentenceIdx = -1;   // 强制下一帧刷新文本
+});
+$('ccClose').addEventListener('click', () => {
+  localStorage.setItem('ccOn', '0');
+  applyCcState(false);
+});
 function getPlayTimeMs(){
   if (!play) return 0;
   if (play.hasAudio) return play.audio.currentTime * 1000;
@@ -1225,6 +1350,7 @@ $('seek').addEventListener('input', e => {
   play.clickIdx = 0;
   for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= tMs) play.clickIdx++; }
   play.lastKey = '';
+  updateSubtitle(tMs);
   // 重新定位到播放位置对应的文件
   const fi = getFileIndexAt(tMs);
   if (fi !== currentFileIndex){
@@ -1316,21 +1442,102 @@ function applyState(t){
     }
   }
 }
-function applyCursor(t){
-  const cs = play.cursor;
-  if (!cs.length){ $('cursor').style.display = 'none'; return; }
-  const el = $('cursor');
-  let i = upperBound(cs, t) - 1;
-  if (i < 0) i = 0;
-  const p = cs[i];
-  // 距离最近光标采样超过 1.5 秒则隐藏（模拟"人手离开"）
-  if (t - p.t > 1500){ el.style.display = 'none'; return; }
-  el.style.display = 'block';
-  // p.x/y 是相对内容元素的比例 (0~1), 乘以当前内容尺寸得到像素, 再转到 #stage 坐标系
+// x/y 是相对内容元素的比例 (0~1), 乘以当前内容尺寸得到像素, 再转到 #stage 坐标系
+function setCursorPos(el, x, y){
   const cr = getContentRect();
   const sr = stage.getBoundingClientRect();
-  el.style.left = (p.x * cr.width + cr.left - sr.left) + 'px';
-  el.style.top = (p.y * cr.height + cr.top - sr.top) + 'px';
+  el.style.left = (x * cr.width + cr.left - sr.left) + 'px';
+  el.style.top = (y * cr.height + cr.top - sr.top) + 'px';
+}
+// 由选区计算内容锚定的光标比例坐标（目标文本末行中点），与离线生成同规则
+function cursorPosFromRange(r){
+  const cr = getContentRect();
+  if (!cr || cr.width <= 0 || cr.height <= 0) return null;
+  const rects = Array.from(r.getClientRects()).filter(x => x.width > 0);
+  const lastRect = rects.length ? rects[rects.length - 1] : r.getBoundingClientRect();
+  const rx = Math.min(1, Math.max(0, ((lastRect.left + Math.min(lastRect.width, 120)) - cr.left) / cr.width));
+  const ry = Math.min(1, Math.max(0, ((lastRect.top + lastRect.height / 2) - cr.top) / cr.height));
+  return { x: Math.round(rx * CURSOR_PREC) / CURSOR_PREC, y: Math.round(ry * CURSOR_PREC) / CURSOR_PREC };
+}
+// 由逐句光标位置/时段批量发射光标采样：
+// - 句内：心跳(≤1.2s，防 1.5s 无采样隐藏) + 句尾；
+// - 句间位置变化时：从上一句位置滑向本句位置，路径是随机左/右凸的弧线（人手轨迹），
+//   速度 slow→fast→slow（缓入缓出）；弧线点直接烤进采样，播放端线性插值即复现。
+// posList[i] 可为 null（该句未定位到锚点），null 会继承上一句位置。
+function emitCursorTimeline(cursor, posList, tList, gapMs){
+  // null 继承上一句位置（光标停在原地）
+  for (let i = 0; i < posList.length; i++){
+    if (!posList[i]) posList[i] = i > 0 ? posList[i - 1] : null;
+  }
+  const easeIO = f => f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
+  const slideDurOf = si => Math.min(900, Math.round((tList[si - 1][1] - tList[si - 1][0]) * 0.4) + gapMs);
+  for (let si = 0; si < posList.length; si++){
+    const pos = posList[si];
+    if (!pos) continue;
+    const startT = tList[si][0], endT = tList[si][1];
+    const prevPos = si > 0 ? posList[si - 1] : null;
+    const nextPos = si < posList.length - 1 ? posList[si + 1] : null;
+    const movedIn = !!(prevPos && (prevPos.x !== pos.x || prevPos.y !== pos.y));
+    const movedOut = !!(nextPos && (nextPos.x !== pos.x || nextPos.y !== pos.y));
+    // 旧位采样只铺到"下一句滑移起点"为止，避免心跳点落进弧线中段导致回放时回跳
+    const cutEnd = movedOut ? Math.min(endT, Math.max(startT, tList[si + 1][0] - slideDurOf(si + 1))) : endT;
+    const HB = 1200;
+    for (let t = startT; t < cutEnd; t += HB){
+      cursor.push({ t: Math.round(t), x: pos.x, y: pos.y });
+    }
+    cursor.push({ t: Math.round(cutEnd), x: pos.x, y: pos.y });
+    // 滑移弧线：上一句位置 → 本句位置
+    if (movedIn){
+      const dur = slideDurOf(si);
+      if (dur > 100){
+        const sStart = startT - dur;
+        const dx = pos.x - prevPos.x, dy = pos.y - prevPos.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        let cx = (prevPos.x + pos.x) / 2, cy = (prevPos.y + pos.y) / 2;
+        if (len > 0.004){
+          // 控制点 = 弦中点 + 垂直偏移（弦长 10%~18%，左右随机）
+          const side = Math.random() < 0.5 ? 1 : -1;
+          const off = len * (0.10 + Math.random() * 0.08);
+          cx += (-dy / len) * off * side;
+          cy += (dx / len) * off * side;
+        }
+        const N = 10;
+        for (let k = 1; k <= N; k++){
+          const f = easeIO(k / N);
+          const b = 1 - f;
+          const x = Math.min(1, Math.max(0, b * b * prevPos.x + 2 * b * f * cx + f * f * pos.x));
+          const y = Math.min(1, Math.max(0, b * b * prevPos.y + 2 * b * f * cy + f * f * pos.y));
+          cursor.push({
+            t: Math.round(sStart + dur * (k / N)),
+            x: Math.round(x * CURSOR_PREC) / CURSOR_PREC,
+            y: Math.round(y * CURSOR_PREC) / CURSOR_PREC
+          });
+        }
+      }
+    }
+  }
+  cursor.sort((a, b) => a.t - b.t);
+}
+function applyCursor(t){
+  const cs = play.cursor;
+  const el = $('cursor');
+  if (!cs.length){ el.style.display = 'none'; return; }
+  let i = upperBound(cs, t) - 1;
+  if (i < 0) i = 0;
+  const p = cs[i], next = cs[i + 1];
+  // 距离"最近"光标采样超过 1.5 秒则隐藏（模拟"人手离开"）
+  const dist = Math.min(t - p.t, next ? next.t - t : Infinity);
+  if (dist > 1500){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  // 采样只是关键锚点：在 t 前后两个采样之间线性插值，每帧连续推进，
+  // 光标滑动而不是逐点跳变（线性避免逐段缓动带来的"走走停停"）
+  let x = p.x, y = p.y;
+  if (next && t < next.t && next.t - p.t > 1){
+    const f = (t - p.t) / (next.t - p.t);
+    x = p.x + (next.x - p.x) * f;
+    y = p.y + (next.y - p.y) * f;
+  }
+  setCursorPos(el, x, y);
 }
 function runClicks(t){
   const clicks = play.clicks;
@@ -1355,6 +1562,7 @@ function tick(){
       play.active = false; $('btnPlay').textContent = '▶ 重播';
     }
     applyState(t); applyCursor(t); runClicks(t); renderAnnotations(t);
+    updateSubtitle(t);   // CC 字幕（暂停拖动进度时也随 getPlayTimeMs 刷新）
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
     const dur = play.dur || 0;
@@ -1363,6 +1571,11 @@ function tick(){
   requestAnimationFrame(tick);
 }
 window.addEventListener('resize', () => { if (play) play.lastKey = ''; });
+// 标签页切走时 getClientRects 可能返回零矩形导致标注渲染成空，回来后要强制重画
+document.addEventListener('visibilitychange', () => {
+  if (annotationTools) annotationTools.renderKey = '';
+  if (play) play.lastKey = '';
+});
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z'
       && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)
@@ -1427,29 +1640,100 @@ function findAnchorOffset(anchor){
   return null;
 }
 
+// 生成用：比 findAnchorOffset 更宽容的定位。
+// 依次尝试：精确匹配 → 忽略空白差异的模糊匹配 → 逐级缩短的前缀匹配。
+// 返回 [a, b] 字符偏移；全部失败返回 null。
+function locateDocText(needle){
+  if (!needle || !doc) return null;
+  const full = doc.textContent || '';
+  const text = String(needle).trim();
+  if (!text) return null;
+  // 1) 精确
+  let idx = full.indexOf(text);
+  if (idx >= 0) return [idx, idx + text.length];
+  // 2) 忽略空白差异：构建压缩文本及每个字符在原文中的下标映射
+  const sqChars = [], sqMap = [];
+  let prevWs = false;
+  for (let i = 0; i < full.length; i++){
+    if (/\s/.test(full[i])){
+      if (!prevWs){ sqChars.push(' '); sqMap.push(i); prevWs = true; }
+    } else {
+      sqChars.push(full[i]); sqMap.push(i); prevWs = false;
+    }
+  }
+  const sqFull = sqChars.join('');
+  const sqTarget = text.replace(/\s+/g, ' ').trim();
+  idx = sqFull.indexOf(sqTarget);
+  if (idx >= 0 && sqTarget.length){
+    const a = sqMap[idx];
+    const b = sqMap[idx + sqTarget.length - 1] + 1;
+    if (b > a) return [a, b];
+  }
+  // 3) 逐级缩短前缀（12 → 8 → 6 → 4 字）
+  for (const L of [12, 8, 6, 4]){
+    if (sqTarget.length < L) continue;
+    const probe = sqTarget.slice(0, L);
+    idx = sqFull.indexOf(probe);
+    if (idx >= 0){
+      const a = sqMap[idx];
+      const b = sqMap[idx + probe.length - 1] + 1;
+      if (b > a) return [a, b];
+    }
+  }
+  return null;
+}
+
 // 解析 NDJSON（清理 ```json 包裹，容错不完整行）
 function parseNDJSON(raw){
   const clean = raw.replace(/```json/gi, '').replace(/```/g, '');
   const result = [];
+  const OP_KINDS = ['highlight', 'underline', 'strike', 'comment'];
+  // 模型常无视提示词里的频率约束，这里做硬性兜底：每类操作封顶（与提示词限额一致），批注必须带内容
+  const OP_CAPS = { highlight: 8, underline: 6, strike: 2, comment: 2 };
+  const used = { highlight: 0, underline: 0, strike: 0, comment: 0 };
   for (const line of clean.split('\n')){
     const t = line.trim();
     if (!t) continue;
     try {
       const obj = JSON.parse(t);
-      if (obj && typeof obj.text === 'string') result.push({ text: obj.text, anchor: obj.anchor || '' });
+      if (obj && typeof obj.text === 'string'){
+        // op: 字符串简写（"highlight"）或对象（{kind,target,text}），解析失败视为无操作
+        let op = null;
+        const rawOp = obj.op;
+        if (typeof rawOp === 'string' && OP_KINDS.includes(rawOp)){
+          op = { kind: rawOp };
+        } else if (rawOp && typeof rawOp === 'object' && OP_KINDS.includes(rawOp.kind)){
+          op = { kind: rawOp.kind };
+          if (typeof rawOp.target === 'string' && rawOp.target.trim()) op.target = rawOp.target.trim();
+          if (typeof rawOp.text === 'string' && rawOp.text.trim()) op.text = rawOp.text.trim();
+        }
+        if (op){
+          if (op.kind === 'comment' && !op.text) op = null;            // 批注没内容 → 放弃
+          else if (used[op.kind] >= OP_CAPS[op.kind]) op = null;       // 超出限额 → 放弃
+          else used[op.kind]++;
+        }
+        // pause: 该句后的思考停顿（ms），夹紧到 0~5000；key: 重难点标记
+        const pause = Math.max(0, Math.min(5000, Math.round(Number(obj.pause) || 0)));
+        const key = obj.key === true;
+        result.push({ text: obj.text, anchor: obj.anchor || '', op, pause, key });
+      }
     } catch(e){ /* 跳过不完整行 */ }
   }
   return result;
 }
 
-// 按字数估算每句时间戳（朗读语速 ~3.5 字/秒 → 280ms/字，每句至少 1.2 秒）
+// 单句时长估算：朗读语速 ~3.5 字/秒 → 280ms/字，每句至少 1.2 秒，再加该句的思考停顿
+function estimateLineDurMs(line){
+  return Math.max(1200, line.text.length * 280) + (line.pause || 0);
+}
+
 function buildTimeline(lines){
-  const PER_CHAR = 280;
   let t = 0;
   scriptTimeline = [];
   for (const line of lines){
-    const dur = Math.max(1200, line.text.length * PER_CHAR);
-    scriptTimeline.push({ text: line.text, anchor: line.anchor, startMs: t, endMs: t + dur });
+    const dur = estimateLineDurMs(line);
+    scriptTimeline.push({ text: line.text, anchor: line.anchor, op: line.op || null,
+      pause: line.pause || 0, key: !!line.key, startMs: t, endMs: t + dur });
     t += dur;
   }
 }
@@ -1459,11 +1743,16 @@ function renderScriptTimeline(lines, streaming){
   scriptBody.classList.remove('placeholder');
   scriptBody.innerHTML = '';
   let t = 0;
+  const OP_BADGE = { highlight: '🖍', underline: '〰', strike: '🚫', comment: '💬' };
   for (const line of lines){
-    const dur = Math.max(1200, line.text.length * 280);
+    const dur = estimateLineDurMs(line);
     const div = document.createElement('div');
     div.className = 'script-line';
-    div.innerHTML = '<span class="script-t">' + fmtTime(t / 1000) + '</span><span class="script-s"></span>';
+    const badges = [];
+    if (line.op && OP_BADGE[line.op.kind]) badges.push('<span class="script-op" title="自动' + line.op.kind + '">' + OP_BADGE[line.op.kind] + '</span>');
+    if (line.key) badges.push('<span class="script-op" title="重难点">🔥</span>');
+    if (line.pause) badges.push('<span class="script-op" title="思考停顿 ' + (line.pause / 1000).toFixed(1) + ' 秒">⏸</span>');
+    div.innerHTML = '<span class="script-t">' + fmtTime(t / 1000) + '</span><span class="script-s"></span>' + badges.join('');
     div.querySelector('.script-s').textContent = line.text;
     scriptBody.appendChild(div);
     t += dur;
@@ -1721,6 +2010,7 @@ async function recordSpeech(){
   const states = [], cursor = [], clicks = [], fileSwitches = [];
   let cursorShowUntil = 0;
   let elapsedMs = 0;
+  const livePosList = [], liveTList = [];   // 逐句光标位置/时段，循环结束后二遍统一发射采样
   scriptRecAbort = false;
 
   if (selLayer) selLayer.innerHTML = '';
@@ -1741,6 +2031,7 @@ async function recordSpeech(){
     if (els[si]) els[si].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
     const curEl = $('cursor');
+    let livePos = null;
     const off = findAnchorOffset(item.anchor);
     if (off){
       const r = offsetsToRange(off[0], off[1]);
@@ -1750,22 +2041,31 @@ async function recordSpeech(){
         sel.removeAllRanges();
         sel.addRange(r);
 
-        const cr = getContentRect();
-        const lineTop = r.getBoundingClientRect().top;
-        const targetScroll = viewer.scrollTop + (lineTop - cr.top) - viewer.clientHeight * 0.3;
-        viewer.scrollTop = Math.max(0, targetScroll);
+        // 滚动：目标已在可视区内（留 15% 边距）就不滚，避免每句都蹭一下。
+        // 用相对视口坐标计算（详见 buildOfflineStates 内注释，cr.top 会随滚动移动不能作基准）
+        const vr = viewer.getBoundingClientRect();
+        const tr = r.getBoundingClientRect();
+        const relTop = tr.top - vr.top;
+        const relBottom = tr.bottom - vr.top;
+        const margin = viewer.clientHeight * 0.15;
+        const vh = viewer.clientHeight;
+        if (relTop < margin || relBottom > vh - margin){
+          const anchorLine = (relBottom > vh - margin && relTop >= margin)
+            ? viewer.scrollTop + relBottom - vh * 0.75
+            : viewer.scrollTop + relTop - vh * 0.25;
+          viewer.scrollTop = Math.max(0, anchorLine);
+        }
 
-        const cr2 = getContentRect();
-        const sr = stage.getBoundingClientRect();
-        const cx = 0.5, cy = 0.3;
-        cursor.push({ t: startT, x: cx, y: cy });
-        clicks.push({ t: startT, x: cx, y: cy });
+        // 光标放到目标文本末行（与离线生成同规则），实时更新预览
+        livePos = cursorPosFromRange(r) || { x: 0.5, y: 0.3 };
+        clicks.push({ t: startT, x: livePos.x, y: livePos.y });
         curEl.style.display = 'block';
-        curEl.style.left = (cx * cr2.width + cr2.left - sr.left) + 'px';
-        curEl.style.top = (cy * cr2.height + cr2.top - sr.top) + 'px';
+        setCursorPos(curEl, livePos.x, livePos.y);
         cursorShowUntil = startT + 700;
       }
     }
+    // 定位失败则光标停在上一句位置
+    if (!livePos) livePos = livePosList.length ? livePosList[livePosList.length - 1] : null;
 
     pushScriptState(states, startT);
 
@@ -1775,9 +2075,13 @@ async function recordSpeech(){
     pushScriptState(states, startT + sentenceDur);
     if (startT + sentenceDur > cursorShowUntil) curEl.style.display = 'none';
 
+    livePosList.push(livePos);
+    liveTList.push([startT, startT + sentenceDur]);
     elapsedMs += sentenceDur;
     item.endMs = elapsedMs;
   }
+  // 二遍发射光标采样：心跳 + 句尾 + 句间滑移弧线（随机左右弯、慢快慢），内部保证按 t 升序
+  emitCursorTimeline(cursor, livePosList, liveTList, 0);
 
   // ── 停止录制 ──
   await new Promise(resolve => {
@@ -1806,7 +2110,8 @@ async function recordSpeech(){
     states, cursor, clicks,
     annotations: snapshotAnnotations(),
     annotationPopups: snapshotAnnotationPopups(),
-    script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs })),
+    script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
+      pause: s.pause || 0, key: s.key || undefined })),
     note: 'auto-generated timeline, chrome TTS, audio captured'
   };
 
@@ -1848,7 +2153,353 @@ function pushScriptState(states, t){
   }
 }
 
-$('scriptRecord').addEventListener('click', recordSpeech);
+/* ---------- 一键生成演讲：在线 TTS 离线合成，免实时播放/录制 ---------- */
+let generatingSpeech = false;
+
+// 编码 16bit PCM 单声道 WAV
+function encodeWavBlob(samples, sampleRate){
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); ws(8, 'WAVE');
+  ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  ws(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44;
+  for (let i = 0; i < n; i++, o += 2){
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// 由每句时长(ms)离线构建时间轴：滚动、选区、光标、标注 —— 与实时录制同一套数据格式。
+// 光标会真实移到被讲内容上并停留（含心跳采样防止 1.5s 隐藏）；
+// 滚动模仿人类操作：上一句快讲完时缓缓起滚、句间加速、下一句开始后缓缓收住（ease-in-out）；
+// LLM 规划的 op（highlight/underline/strike/comment）在对应时间点自动创建为标注。
+function buildOfflineStates(dursMs, gapMs){
+  const states = [], cursor = [], clicks = [], fileSwitches = [];
+  const newAnnotations = [];   // 本次生成新建的标注（用于去重与记录）
+  const popupEvents = [];      // 批注气泡开合时间轴
+  const curEl = $('cursor');
+  const lineEls = () => scriptBody.querySelectorAll('.script-line');
+  // 清除上一次生成创建的自动标注，避免重复生成时叠加
+  for (let i = annotations.length - 1; i >= 0; i--){
+    if (typeof annotations[i].id === 'string' && annotations[i].id.indexOf('ann-gen-') === 0){
+      annotations.splice(i, 1);
+    }
+  }
+  if (selLayer) selLayer.innerHTML = '';
+  curEl.style.display = 'none';
+  window.getSelection().removeAllRanges();
+
+  const isMd = source && source.type === 'md';
+
+  let elapsed = 0;
+  let prevPos = null;       // 上一句光标比例坐标（定位失败时继承）
+  const posArr = [], tArr = [];   // 逐句光标位置/时段，循环结束后二遍统一发射采样
+  let prevSelObj = null;         // 上一句的选区状态（滚动窗口前段保持它）
+  let lastScrollEnd = -1e9;      // 上一次滚动动画的结束时刻（防窗口重叠）
+  for (let si = 0; si < scriptTimeline.length; si++){
+    const item = scriptTimeline[si];
+    const startT = Math.round(elapsed);
+    const endT = startT + Math.round(dursMs[si]);
+    item.startMs = startT;
+    item.endMs = endT;
+
+    const els = lineEls();
+    els.forEach((el, i) => el.classList.toggle('active', i === si));
+
+    // 定位目标文本：优先 op.target（精确原文），退回 anchor。
+    // opRange 专门给标注用：op.target 失配时放弃该 op，绝不把标注画到 anchor 上
+    let range = null, offs = null, opRange = null, opOffs = null;
+    const op = item.op;
+    if (op && op.target){
+      const o = locateDocText(op.target);
+      if (o){ const r = offsetsToRange(o[0], o[1]); if (r){ opRange = r; opOffs = o; } }
+    }
+    if (!opRange){
+      // 锚点也用模糊定位，提高光标/滚动落点成功率
+      let o = locateDocText(item.anchor);
+      if (!o) o = findAnchorOffset(item.anchor);
+      if (o){ const r = offsetsToRange(o[0], o[1]); if (r){ range = r; offs = o; } }
+    } else {
+      range = opRange; offs = opOffs;
+    }
+
+    let pos = prevPos;   // 定位失败则光标原地不动
+    if (range){
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      // 滚动目标位：可视区内（留 15% 边距）不动，快出视野才滚。
+      // 必须用"相对视口"坐标计算（cr.top 随滚动移动，会把已滚距离重复计入导致过冲）
+      const vr = viewer.getBoundingClientRect();
+      const tr0 = range.getBoundingClientRect();
+      const relTop = tr0.top - vr.top;
+      const relBottom = tr0.bottom - vr.top;
+      const margin = viewer.clientHeight * 0.15;
+      const vh = viewer.clientHeight;
+      const y0 = viewer.scrollTop;
+      let y1 = y0;
+      if (relTop < margin || relBottom > vh - margin){
+        // 向下续读：目标底部停靠在视口 75% 处（保留上文）；向上回跳：目标顶部停在 25% 处
+        const anchorLine = (relBottom > vh - margin && relTop >= margin)
+          ? y0 + relBottom - vh * 0.75
+          : y0 + relTop - vh * 0.25;
+        y1 = Math.max(0, Math.min(anchorLine, viewer.scrollHeight - vh));
+      }
+      viewer.scrollTop = y1;   // 供后续句子测量与光标取矩形用
+      const maxScroll = viewer.scrollHeight - vh;
+      const srOf = y => maxScroll > 0 ? Math.round(y / maxScroll * 10000) / 10000 : 0;
+      const selObj = offs ? { a: offs[0], b: offs[1] } : null;
+      const selChanged = (!!selObj !== !!prevSelObj)
+        || (selObj && prevSelObj && (selObj.a !== prevSelObj.a || selObj.b !== prevSelObj.b));
+
+      // 光标：放到目标文本末行中点（比例坐标是内容锚定的，与滚动动画无关）
+      const p2 = cursorPosFromRange(range);
+      if (p2) pos = p2;
+
+      // 人类式滚动：上一句快讲完时缓缓起滚 → 句间加速 → 下一句开始后缓缓收住（ease-in-out）。
+      // 窗口 = [上一句结束前 lead, 本句开始后 settle]；lead ≤ 40% 句长，窗口互不重叠。
+      if (Math.abs(y1 - y0) > 1){
+        const settle = 450;
+        const lead = si > 0 ? Math.min(1100, Math.round(dursMs[si - 1] * 0.4)) : 0;
+        let wStart = si > 0 ? startT - gapMs - lead : startT;
+        wStart = Math.max(wStart, lastScrollEnd + 80);
+        const wEnd = startT + settle;
+        const animDur = Math.max(120, wEnd - wStart);
+        const ease = f => f < 0.5 ? 4 * f * f * f : 1 - Math.pow(-2 * f + 2, 3) / 2;
+        for (let t = wStart; t < wEnd; t += 80){
+          const f = Math.min(1, (t - wStart) / animDur);
+          const y = Math.round(y0 + (y1 - y0) * ease(f));
+          // 窗口前段（还在讲上一句）保持上一句的选区，本句开始后切到新选区
+          states.push({ t: Math.round(t), sr: srOf(y), y, s: t < startT ? prevSelObj : selObj });
+        }
+        states.push({ t: wEnd, sr: srOf(y1), y: Math.round(y1), s: selObj });
+        lastScrollEnd = wEnd;
+      } else if (selChanged){
+        // 不滚但讲解对象变了 → 句首一条状态切换高亮
+        states.push({ t: startT, sr: srOf(y1), y: Math.round(y1), s: selObj });
+      }
+      prevSelObj = selObj;
+    }
+
+    // 光标采样在循环结束后二遍统一发射（需要下一句的位置才能确定滑移窗口），这里只记录
+    posArr[si] = pos;
+    tArr[si] = [startT, endT];
+    if (pos) clicks.push({ t: startT, x: pos.x, y: pos.y });
+    prevPos = pos;
+
+    // 自动标注：按 op 在朗读该句时创建（比句首晚 400ms，像"讲到才画上去"）
+    if (op && opRange && opOffs && isMd && op.kind !== 'none'){
+      const tool = window.LectureLiteToolRegistry && window.LectureLiteToolRegistry.get(op.kind);
+      if (tool){
+        const annT = startT + 400;
+        const annotation = {
+          id: 'ann-gen-' + si + '-' + Date.now().toString(36),
+          t: annT,
+          type: op.kind,
+          fi: typeof currentFileIndex === 'number' ? currentFileIndex : 0,
+          quote: (doc.textContent || '').slice(opOffs[0], opOffs[1]).slice(0, 500)
+        };
+        annotation.offsets = opOffs.slice();
+        if (op.kind === 'comment') annotation.text = op.text || '';
+        annotations.push(annotation);
+        newAnnotations.push(annotation);
+        if (op.kind === 'comment' && annotation.text){
+          // 批注气泡：标注后 600ms 打开，朗读完该句后关闭
+          popupEvents.push({ t: annT + 600, id: annotation.id, fi: annotation.fi, open: true });
+          popupEvents.push({ t: endT + 300, id: annotation.id, fi: annotation.fi, open: false });
+        }
+      }
+    }
+
+    // （滚动/选区状态已由上方人类式滚动窗口与句首状态显式写出，无需 pushScriptState 兜底）
+    elapsed = endT + gapMs;
+  }
+
+  // 二遍发射光标采样：心跳 + 句尾 + 句间滑移弧线（随机左右弯、慢快慢），内部保证按 t 升序
+  emitCursorTimeline(cursor, posArr, tArr, gapMs);
+
+  scriptBody.querySelectorAll('.script-line').forEach(el => el.classList.remove('active'));
+  curEl.style.display = 'none';
+  window.getSelection().removeAllRanges();
+
+  // 同步到标注工具与图层（生成过程即时可见，导出时也会被快照进 json）
+  if (annotationTools) annotationTools.setAnnotations(annotations);
+  renderAnnotations();
+
+  return { states, cursor, clicks, fileSwitches, newAnnotations, popupEvents, totalDurMs: Math.max(0, elapsed - gapMs) };
+}
+
+async function generateSpeech(){
+  const btn = $('scriptRecord');
+  generatingSpeech = true;
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  $('btnExport').disabled = true;
+  $('btnShare').disabled = true;
+  $('scriptRegen').disabled = true;
+  $('btnStart').disabled = true;
+  $('btnStop').disabled = true;
+  $('srcPick').disabled = true;
+  $('scriptEdgeVoice').disabled = true;
+  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#c4423a;animation:none"></span>生成中…';
+
+  try {
+    const rate = parseFloat($('scriptTtsRate').value) || 1;
+    const useTts = $('scriptTtsEnabled').checked;
+    const gapMs = 350;   // 句间自然停顿
+
+    let audioBlob = null;
+    let dursMs;
+
+    if (useTts){
+      // 1) 在线逐句合成（SSE 流式返回 base64 mp3）
+      const voice = $('scriptEdgeVoice').value || 'zh-CN-XiaoxiaoNeural';
+      const jobs = [];
+      scriptTimeline.forEach((s, i) => { if (s.text && s.text.trim()) jobs.push({ i, text: s.text.trim() }); });
+      if (!jobs.length) throw new Error('讲稿内容为空');
+
+      const audios = new Array(jobs.length).fill(null);   // 与 jobs 对齐；空句记 0
+      let received = 0;
+
+      const resp = await fetch('/generate-speech-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sentences: jobs.map(j => j.text), voice, rate })
+      });
+      if (!resp.ok){
+        let msg = 'HTTP ' + resp.status;
+        try { const j = await resp.json(); if (j.error) msg = j.error; } catch(e){}
+        throw new Error(msg);
+      }
+      const onChunk = chunk => {
+        if (chunk.error) throw new Error(chunk.error);
+        if (typeof chunk.i !== 'number') return;
+        if (chunk.empty){ audios[chunk.i] = 0; received++; return; }
+        if (chunk.b64 != null){
+          const bin = atob(chunk.b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+          audios[chunk.i] = bytes.buffer;
+          received++;
+          status('在线语音合成中… ' + received + '/' + jobs.length + ' 句');
+        }
+      };
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      while (true){
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines){
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          let chunk;
+          try { chunk = JSON.parse(trimmed.slice(6)); } catch(e){ continue; }
+          onChunk(chunk);
+        }
+      }
+      if (buffer.trim().startsWith('data: ')){
+        try { onChunk(JSON.parse(buffer.trim().slice(6))); } catch(e){}
+      }
+      if (audios.some(a => a === null)) throw new Error('语音合成结果不完整');
+
+      status('音频就绪，正在解码拼接…');
+
+      // 2) 解码到 24kHz（省体积），逐句拼接为一条音轨，句间留停顿
+      let ctx;
+      try { ctx = new OfflineAudioContext(1, 1, 24000); }
+      catch(e){ ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+      const parts = new Array(scriptTimeline.length).fill(null);   // 每句的 PCM 数据，空句为 null
+      let sr = 24000;
+      for (let k = 0; k < jobs.length; k++){
+        if (!audios[k]) continue;   // 空句：静音占位
+        const ab = await ctx.decodeAudioData(audios[k]);
+        sr = ab.sampleRate;
+        parts[jobs[k].i] = ab.getChannelData(0);
+      }
+      const silentLen = Math.round(0.4 * sr);
+      const gapSamples = Math.round(gapMs / 1000 * sr);
+      // 每句朗读完后的额外思考停顿（来自讲稿 pause 字段，静音填充）
+      const pauseLen = i => Math.round(((scriptTimeline[i] && scriptTimeline[i].pause) || 0) / 1000 * sr);
+      let totalLen = 0;
+      for (let i = 0; i < parts.length; i++){
+        totalLen += (parts[i] ? parts[i].length : silentLen) + pauseLen(i);
+        if (i < parts.length - 1) totalLen += gapSamples;
+      }
+      const mixed = new Float32Array(totalLen);
+      let off = 0;
+      for (let i = 0; i < parts.length; i++){
+        if (parts[i]) mixed.set(parts[i], off);
+        off += (parts[i] ? parts[i].length : silentLen) + pauseLen(i);
+        if (i < parts.length - 1) off += gapSamples;
+      }
+
+      // 每句时长包含思考停顿，时间轴（光标/滚动/字幕）与音频对齐
+      dursMs = parts.map((p, i) => (p ? p.length / sr * 1000 : 400) + ((scriptTimeline[i] && scriptTimeline[i].pause) || 0));
+      audioBlob = encodeWavBlob(mixed, sr);
+    } else {
+      // 未勾选「语音」：不合成音频，按字数估算时长（含停顿），生成纯时间轴包
+      dursMs = scriptTimeline.map(s => Math.max(400, s.text.length * 280) + (s.pause || 0));
+    }
+
+    // 3) 离线构建时间轴并组装导出包（标注/气泡事件已在 buildOfflineStates 中按时间点写入）
+    const tl = buildOfflineStates(dursMs, gapMs);
+
+    const json = {
+      v: 3, app: 'LectureLite', created: new Date().toISOString(),
+      duration: tl.totalDurMs / 1000,
+      viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+      file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
+      files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+      fileSwitches: tl.fileSwitches,
+      states: tl.states, cursor: tl.cursor, clicks: tl.clicks,
+      annotations: snapshotAnnotations(),
+      annotationPopups: tl.popupEvents,
+      script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
+        op: s.op || undefined, pause: s.pause || 0, key: s.key || undefined })),
+      note: audioBlob ? 'auto-generated timeline, edge-tts offline synthesis' : 'auto-generated timeline, no audio'
+    };
+
+    recState = { audioBlob, json, finished: true };
+    $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
+    const audioSize = audioBlob ? '，音频 ' + (audioBlob.size / 1048576).toFixed(1) + ' MB' : '，无语音';
+    status('生成完成：' + fmtTime(json.duration) + audioSize + '，' + tl.states.length + ' 条状态 / ' + tl.cursor.length + ' 个光标点 / ' + tl.newAnnotations.length + ' 个自动标注 → 可导出');
+  } finally {
+    generatingSpeech = false;
+    btn.disabled = false;
+    btn.textContent = '录制演讲';
+    $('scriptRegen').disabled = false;
+    $('scriptEdgeVoice').disabled = false;
+    $('srcPick').disabled = false;
+    $('btnStart').disabled = false;
+    $('btnStop').disabled = true;
+    const ready = recState && recState.finished;
+    $('btnExport').disabled = !ready;
+    $('btnShare').disabled = !ready || !(recState && recState.audioBlob);
+  }
+}
+
+$('scriptRecord').addEventListener('click', async () => {
+  if (generatingSpeech || recordingScript || !scriptTimeline.length) return;
+  if (!source){ status('请先加载文档'); return; }
+  try {
+    await generateSpeech();
+  } catch (err){
+    // 在线合成失败（serve.py 未运行 / 未装 edge-tts / 网络不通）→ 回退浏览器 TTS 实时录制
+    status('在线合成失败（' + err.message + '），回退到浏览器语音实时录制…', true);
+    await recordSpeech();
+  }
+});
 
 function showHelp(){ $('intro').classList.add('show'); }
 function hideHelp(){ $('intro').classList.remove('show'); }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading
+import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading, asyncio, base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
@@ -14,6 +14,16 @@ except ImportError:
     _gen_script = None
     _gen_script_stream = None
     _gen_script_timeline_stream = None
+
+# ── edge-tts 语音合成（按需导入，无 edge-tts 包也能工作）──
+try:
+    from llm.tts_generator import synth_stream as _tts_synth_stream
+    from llm.tts_generator import list_zh_voices as _tts_list_voices
+    from llm.tts_generator import DEFAULT_VOICE as _TTS_DEFAULT_VOICE
+except ImportError:
+    _tts_synth_stream = None
+    _tts_list_voices = None
+    _TTS_DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 
 PORT = 8663
 WEB_DIR = Path(__file__).parent.resolve()
@@ -57,6 +67,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urllib.parse.unquote(self.path.split("?")[0])
+
+        # /tts-voices → edge-tts 中文语音列表
+        if path == "/tts-voices":
+            if _tts_list_voices is None:
+                self._send_json(503, {"error": "llm.tts_generator 未找到（需 pip install edge-tts）"})
+                return
+            try:
+                self._send_json(200, {"success": True, "voices": _tts_list_voices()})
+            except Exception as e:
+                self._send_json(500, {"error": f"获取语音列表失败: {e}"})
+            return
 
         # /share/<id> → 重定向到播放页带参数
         if path.startswith("/share/"):
@@ -103,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_generate_script_stream()
         elif self.path == "/generate-script-timeline":
             self._handle_generate_script_timeline()
+        elif self.path == "/generate-speech-stream":
+            self._handle_generate_speech_stream()
         else:
             self._send(404, b"Not Found", "text/plain")
             return
@@ -279,6 +302,56 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    # ── /generate-speech-stream（SSE 逐句返回合成音频，base64 mp3）──
+    def _handle_generate_speech_stream(self):
+        if _tts_synth_stream is None:
+            self._send_json(503, {"error": "llm.tts_generator 未找到（需 pip install edge-tts）"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            sentences = data.get("sentences", [])
+            voice = data.get("voice") or _TTS_DEFAULT_VOICE
+            rate = data.get("rate", 1.0)
+            if not isinstance(sentences, list) or not sentences:
+                self._send_json(400, {"error": "缺少句子列表"})
+                return
+        except Exception as e:
+            self._send_json(400, {"error": f"请求解析失败: {e}"})
+            return
+
+        # SSE 响应（不设 Content-Length，发完关闭连接通知客户端）
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self._cors()
+        self.end_headers()
+
+        def emit(obj):
+            chunk = f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+            self.wfile.write(chunk)
+            self.wfile.flush()
+
+        async def _drive():
+            async for idx, audio in _tts_synth_stream(sentences, voice, rate):
+                if audio is None:
+                    emit({"i": idx, "empty": True})
+                else:
+                    emit({"i": idx, "b64": base64.b64encode(audio).decode("ascii")})
+            emit({"done": True})
+
+        try:
+            asyncio.run(_drive())
+        except Exception as e:
+            try:
+                emit({"error": f"语音合成失败: {e}"})
+            except Exception:
+                pass
+        finally:
+            self.close_connection = True
+
     # ── multipart helpers ──
 
     @staticmethod
@@ -356,12 +429,11 @@ def main():
     httpd = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
 
     url = f"http://127.0.0.1:{PORT}/lecture-lite.html"
-    print("=" * 60)
-    print("  LectureLite 服务已启动")
-    print(f"  局域网 IP: {LAN_IP}")
-    print(f"  服务端口: {PORT}")
-    print(f"  本机访问: {url}")
-    print(f"  局域网访问: http://{LAN_IP}:{PORT}/lecture-lite.html")
+    print("LectureLite 服务已启动")
+    print(f"局域网 IP: {LAN_IP}")
+    print(f"服务端口: {PORT}")
+    print(f"本机访问: {url}")
+    print(f"局域网访问: http://{LAN_IP}:{PORT}/lecture-lite.html")
 
     # 自动打开浏览器
     webbrowser.open(url)
