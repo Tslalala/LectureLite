@@ -61,7 +61,12 @@
       button.type = "button";
       button.className = "annotation-tool-button" + (inMenu ? " annotation-more-item" : "");
       button.dataset.tool = tool.type;
-      if (tool.icon) {
+      if (tool.svg) {
+        const icon = document.createElement("span");
+        icon.className = "annotation-tool-icon";
+        icon.innerHTML = tool.svg;
+        button.appendChild(icon);
+      } else if (tool.icon) {
         const icon = document.createElement("span");
         icon.className = "annotation-tool-icon annotation-tool-icon-" + tool.type;
         icon.textContent = tool.icon;
@@ -105,6 +110,17 @@
         this.showToolbar(descriptor.rect, event.clientX, event.clientY);
       };
       this.onOutsidePointerDown = event => {
+        // 点击批注气泡 / 波浪线以外的地方：收起已固定的气泡
+        if (this.lockedComments.size) {
+          const hit = event.target.closest && event.target.closest("[data-annotation-id]");
+          const keep = hit ? hit.dataset.annotationId : null;
+          Array.from(this.lockedComments).forEach(id => {
+            if (id !== keep) {
+              this.lockedComments.delete(id);
+              this.setCommentOpen(id, false);
+            }
+          });
+        }
         if (!this.toolbar.contains(event.target) && !this.composer.contains(event.target) && !this.doc.contains(event.target)) {
           this.hide();
         }
@@ -386,13 +402,17 @@
     render(time) {
       const fi = this.options.getFileIndex();
       const sourceType = this.options.getSourceType();
+      // 播放模式标注只读：不允许悬停删除 / 打开编辑入口
+      const readonly = this.options.getMode() === "play";
       const visible = this.annotations.filter(item => item.fi === fi
         && (time == null || item.t <= time)
         && (item.removedAt == null || (time != null && time < item.removedAt)));
-      const key = fi + "|" + sourceType + "|" + (time == null ? "all" : visible.map(item => item.id || [item.t, item.type].join("-")).join(","));
+      const key = (readonly ? "play" : "rec") + "|" + fi + "|" + sourceType + "|"
+        + (time == null ? "all" : visible.map(item => item.id || [item.t, item.type].join("-")).join(","));
       if (key === this.renderKey && this.layer && this.doc.contains(this.layer)) return;
       this.renderKey = key;
       this.ensureLayer();
+      this.layer.classList.toggle("readonly", readonly);
       this.layer.innerHTML = "";
       this.commentPopovers.clear();
       visible.forEach(annotation => this.renderAnnotation(annotation, sourceType));
@@ -440,16 +460,24 @@
         wave.style.top = rect.top + rect.height - 5 + "px";
         wave.style.width = rect.width + "px";
         wave.style.height = "8px";
+        wave.dataset.annotationId = id;
         wave.tabIndex = 0;
         wave.setAttribute("role", "button");
-        wave.setAttribute("aria-label", "查看批注：" + (annotation.text || "") + "；点击删除批注");
+        wave.setAttribute("aria-label", "查看批注：" + (annotation.text || ""));
         wave.addEventListener("mouseenter", () => this.setCommentOpen(id, true));
         wave.addEventListener("mouseleave", () => this.scheduleCommentClose(id));
         wave.addEventListener("focus", () => this.setCommentOpen(id, true));
         wave.addEventListener("blur", () => this.scheduleCommentClose(id));
+        // 点击 = 固定显示 / 收起批注内容；删除入口在气泡内
         wave.addEventListener("click", event => {
           event.stopPropagation();
-          this.removeAnnotation(id);
+          if (this.lockedComments.has(id)) {
+            this.lockedComments.delete(id);
+            this.setCommentOpen(id, false);
+          } else {
+            this.lockedComments.add(id);
+            this.setCommentOpen(id, true);
+          }
         });
         this.layer.appendChild(wave);
       });
@@ -460,7 +488,23 @@
       popover.dataset.annotationId = id;
       popover.style.left = Math.max(8, Math.min(last.left, this.doc.clientWidth - 300)) + "px";
       popover.style.top = last.top + last.height + 9 + "px";
-      popover.textContent = annotation.text || "批注";
+      const body = document.createElement("div");
+      body.className = "annotation-popover-text";
+      body.textContent = annotation.text || "批注";
+      popover.appendChild(body);
+      if (this.options.getMode() !== "play") {
+        const foot = document.createElement("div");
+        foot.className = "annotation-popover-foot";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "删除批注";
+        del.addEventListener("click", event => {
+          event.stopPropagation();
+          this.removeAnnotation(id);
+        });
+        foot.appendChild(del);
+        popover.appendChild(foot);
+      }
       popover.addEventListener("mouseenter", () => this.setCommentOpen(id, true));
       popover.addEventListener("mouseleave", () => this.scheduleCommentClose(id));
       popover.addEventListener("click", event => {
@@ -517,18 +561,17 @@
     addStickerAnchor(rect, annotation, tool, renderer) {
       const variant = (tool.variants || []).find(item => item.id === annotation.icon)
         || (tool.variants || [])[0];
+      const wrap = document.createElement("div");
+      wrap.className = "annotation-item";
+      wrap.style.left = rect.left + rect.width + "px";
+      wrap.style.top = rect.top + rect.height / 2 + "px";
       const anchor = document.createElement("div");
       anchor.className = "annotation-anchor " + (renderer.anchorClass || "");
-      anchor.style.left = rect.left + rect.width + "px";
-      anchor.style.top = rect.top + rect.height / 2 + "px";
       if (variant) anchor.innerHTML = variant.svg;
       anchor.title = variant ? variant.label : "标记";
-      anchor.classList.add("annotation-editable");
-      anchor.addEventListener("click", event => {
-        event.stopPropagation();
-        this.removeAnnotation(annotation.id);
-      });
-      this.layer.appendChild(anchor);
+      wrap.appendChild(anchor);
+      wrap.appendChild(this.createDeleteChip(annotation));
+      this.layer.appendChild(wrap);
     }
 
     markdownRects(annotation) {
@@ -563,34 +606,50 @@
       }).filter(Boolean);
     }
 
-    addRect(rect, className, annotation) {
-      const mark = document.createElement("div");
-      mark.className = "annotation-mark annotation-editable " + className;
-      mark.style.left = rect.left + "px";
-      mark.style.top = rect.top + "px";
-      mark.style.width = rect.width + "px";
-      mark.style.height = rect.height + "px";
-      mark.title = "点击删除" + (annotation.type === "highlight" ? "高亮" : annotation.type === "underline" ? "下划线" : "删除线");
-      mark.addEventListener("click", event => {
+    // 悬停标注才出现的删除小按钮（×），替代原来"点击即删"的隐式逻辑
+    createDeleteChip(annotation) {
+      const tool = window.LectureLiteToolRegistry.get(annotation.type);
+      const label = (tool && tool.label) || "标注";
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "annotation-del";
+      chip.textContent = "×";
+      chip.title = "删除" + label;
+      chip.setAttribute("aria-label", "删除" + label);
+      chip.addEventListener("pointerdown", event => event.stopPropagation());
+      chip.addEventListener("click", event => {
         event.stopPropagation();
         this.removeAnnotation(annotation.id);
       });
-      this.layer.appendChild(mark);
+      return chip;
+    }
+
+    addRect(rect, className, annotation) {
+      const wrap = document.createElement("div");
+      wrap.className = "annotation-item";
+      wrap.style.left = rect.left + "px";
+      wrap.style.top = rect.top + "px";
+      wrap.style.width = rect.width + "px";
+      wrap.style.height = rect.height + "px";
+      const mark = document.createElement("div");
+      mark.className = "annotation-mark " + className;
+      wrap.appendChild(mark);
+      wrap.appendChild(this.createDeleteChip(annotation));
+      this.layer.appendChild(wrap);
     }
 
     addAnchor(rect, text, className, annotation) {
+      const wrap = document.createElement("div");
+      wrap.className = "annotation-item";
+      wrap.style.left = rect.left + rect.width + "px";
+      wrap.style.top = rect.top + rect.height / 2 + "px";
       const anchor = document.createElement("div");
       anchor.className = "annotation-anchor " + className;
-      anchor.style.left = rect.left + rect.width + "px";
-      anchor.style.top = rect.top + rect.height / 2 + "px";
       anchor.textContent = text;
       anchor.title = annotation.quote || "";
-      anchor.classList.add("annotation-editable");
-      anchor.addEventListener("click", event => {
-        event.stopPropagation();
-        this.removeAnnotation(annotation.id);
-      });
-      this.layer.appendChild(anchor);
+      wrap.appendChild(anchor);
+      wrap.appendChild(this.createDeleteChip(annotation));
+      this.layer.appendChild(wrap);
     }
   }
 

@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""文稿自动生成工具 - 调用本地大模型生成讲解稿
+"""文稿自动生成工具 - 调用大模型生成讲解稿
 
 使用 OpenAI Python SDK，严格遵循 OpenAI 兼容接口。
+模型服务通过环境变量配置（也可用命令行覆盖）：
+
+    LLM_BASE_URL   OpenAI 兼容接口地址（默认 http://10.133.72.161:20133/v1）
+    LLM_API_KEY    API Key（默认 callmemaybe）
+    LLM_MODEL      模型名（默认 Qwen3.8-27B-BF16）
 """
+
+import os
+import re
 
 from openai import OpenAI
 
-# 大模型配置
+# 大模型配置（环境变量可覆盖）
 client = OpenAI(
-    base_url="http://10.133.72.161:20133/v1",
-    api_key="callmemaybe",
+    base_url=os.environ.get("LLM_BASE_URL", "http://10.133.72.161:20133/v1"),
+    api_key=os.environ.get("LLM_API_KEY", "callmemaybe"),
 )
 
-MODEL_NAME = "Qwen3.8-27B-BF16"
+MODEL_NAME = os.environ.get("LLM_MODEL", "Qwen3.8-27B-BF16")
 
 LENGTH_MAP = {
     "short": "5分钟",
@@ -20,7 +28,7 @@ LENGTH_MAP = {
     "long": "20-30分钟",
 }
 
-# 文档截取上限（字符）。给太短会让模型"看不见"文档后半部分，讲稿只能跳过那些内容。
+# 单次请求的文档上限（字符）。超过时按标题分块，逐块生成再拼接（见 generate_script_timeline_stream）。
 MAX_CONTENT_CHARS = 12000
 
 # ── 通用讲解要求（纯文本版与 NDJSON 版提示词共用，保持口径一致）──
@@ -50,6 +58,68 @@ def _clip(content, with_note=False):
     return content
 
 
+def _split_into_chunks(content, limit=MAX_CONTENT_CHARS):
+    """按 markdown 标题把文档切成若干不超过 limit 字的块（贪心合并小节）。
+
+    单节超过 limit 时按段落硬切。返回块列表；短文档返回 [content] 原样。
+    """
+    if len(content) <= limit:
+        return [content]
+    lines = content.split("\n")
+    sections = []
+    cur = []
+    for ln in lines:
+        if re.match(r"^#{1,6}\s", ln) and cur:
+            sections.append("\n".join(cur))
+            cur = []
+        cur.append(ln)
+    if cur:
+        sections.append("\n".join(cur))
+    if len(sections) == 1:
+        # 没有标题可切：按硬长度切
+        return [content[i:i + limit] for i in range(0, len(content), limit)]
+
+    chunks = []
+    buf = ""
+    for sec in sections:
+        # 单节超长：先把 buf 封块，再硬切该节
+        if len(sec) > limit:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            for i in range(0, len(sec), limit):
+                chunks.append(sec[i:i + limit])
+            continue
+        if buf and len(buf) + len(sec) + 1 > limit:
+            chunks.append(buf)
+            buf = sec
+        else:
+            buf = (buf + "\n" + sec) if buf else sec
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+def _plain_system_prompt():
+    return (
+        "你是一位经验丰富的大学讲师和演讲教练。"
+        "请根据文档内容生成一份口语化、颗粒度细、真实自然的讲解稿。\n"
+        + COVERAGE_RULES +
+        "【输出格式】\n"
+        "1. 直接输出讲稿正文，口语讲解口吻，每句不超过 120 字，适合朗读\n"
+        "2. 不要 Markdown 标题，纯文本分段落即可（一段一个讲解单元，不超过 3 句）\n"
+    )
+
+
+def _plain_user_prompt(duration, topic, doc_text):
+    return (
+        f"请为以下文档生成一份约 {duration} 的讲解稿（覆盖优先，时长可略超）。\n\n"
+        f"讲解主题：{topic if topic else '（请根据内容确定合适的主题）'}\n\n"
+        f"===== 文档内容 =====\n{doc_text}\n===== 结束 =====\n\n"
+        "请直接输出讲解稿正文。"
+    )
+
+
 def generate_script(content, topic="", length="medium"):
     """根据文档内容生成讲解稿（非流式）。
 
@@ -64,27 +134,11 @@ def generate_script(content, topic="", length="medium"):
     duration = LENGTH_MAP.get(length, "10-15分钟")
     clipped = _clip(content)
 
-    system = (
-        "你是一位经验丰富的大学讲师和演讲教练。"
-        "请根据文档内容生成一份口语化、颗粒度细、真实自然的讲解稿。\n"
-        + COVERAGE_RULES +
-        "【输出格式】\n"
-        "1. 直接输出讲稿正文，口语讲解口吻，每句不超过 120 字，适合朗读\n"
-        "2. 不要 Markdown 标题，纯文本分段落即可（一段一个讲解单元，不超过 3 句）\n"
-    )
-
-    user = (
-        f"请为以下文档生成一份约 {duration} 的讲解稿（覆盖优先，时长可略超）。\n\n"
-        f"讲解主题：{topic if topic else '（请根据内容确定合适的主题）'}\n\n"
-        f"===== 文档内容 =====\n{clipped}\n===== 结束 =====\n\n"
-        "请直接输出讲解稿正文。"
-    )
-
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "system", "content": _plain_system_prompt()},
+            {"role": "user", "content": _plain_user_prompt(duration, topic, clipped)},
         ],
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         temperature=0.7,
@@ -103,27 +157,11 @@ def generate_script_stream(content, topic="", length="medium"):
     duration = LENGTH_MAP.get(length, "10-15分钟")
     clipped = _clip(content)
 
-    system = (
-        "你是一位经验丰富的大学讲师和演讲教练。"
-        "请根据文档内容生成一份口语化、颗粒度细、真实自然的讲解稿。\n"
-        + COVERAGE_RULES +
-        "【输出格式】\n"
-        "1. 直接输出讲稿正文，口语讲解口吻，每句不超过 120 字，适合朗读\n"
-        "2. 不要 Markdown 标题，纯文本分段落即可（一段一个讲解单元，不超过 3 句）\n"
-    )
-
-    user = (
-        f"请为以下文档生成一份约 {duration} 的讲解稿（覆盖优先，时长可略超）。\n\n"
-        f"讲解主题：{topic if topic else '（请根据内容确定合适的主题）'}\n\n"
-        f"===== 文档内容 =====\n{clipped}\n===== 结束 =====\n\n"
-        "请直接输出讲解稿正文。"
-    )
-
     stream = client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "system", "content": _plain_system_prompt()},
+            {"role": "user", "content": _plain_user_prompt(duration, topic, clipped)},
         ],
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         temperature=0.7,
@@ -137,18 +175,8 @@ def generate_script_stream(content, topic="", length="medium"):
             yield delta
 
 
-def generate_script_timeline_stream(content, topic="", length="medium"):
-    """流式生成带时间轴的讲解稿（NDJSON：每行 {text, anchor, pause?, key?, op?}）。
-
-    时间戳由前端按音频时长计算，模型只输出句子、文档锚点、节奏标记（pause/key）与视觉操作。
-    op 决定该句朗读时画面上的动作：无操作 / 高亮 / 下划线 / 删除线 / 批注，
-    批注级别最高，只给最重要的知识点。target 必须是文档原文的连续子串。
-    Yields: 模型输出的原始文本片段
-    """
-    duration_label = LENGTH_MAP.get(length, "10-15分钟")
-    clipped = _clip(content, with_note=True)
-
-    system = (
+def _timeline_system_prompt():
+    return (
         "你是一位经验丰富的大学讲师和演讲教练。"
         "请把文档内容讲成一份口语化、颗粒度细、真实自然的讲解稿，"
         "以句子为单位逐行输出，并为每句规划画面操作与节奏标记。\n"
@@ -185,29 +213,82 @@ def generate_script_timeline_stream(content, topic="", length="medium"):
         "不要在 JSON 内部换行，不要输出 JSON 以外的任何内容"
     )
 
-    user = (
+
+def _timeline_user_prompt(duration_label, topic, doc_text, part_idx=None, part_total=None):
+    """NDJSON 版 user 提示词；part_idx/part_total 用于长文档分块（1 起计）。"""
+    part_note = ""
+    if part_total and part_total > 1:
+        if part_idx == 1:
+            part_note = (f"【分块说明】原文较长，这里只是第 1/{part_total} 部分，后面还有 {part_total - 1} 部分。"
+                         "请完整覆盖本部分并自然结束，不要在结尾做全文总结。\n")
+        elif part_idx < part_total:
+            part_note = (f"【分块说明】这是原文的第 {part_idx}/{part_total} 部分，前面部分已讲完。"
+                         "请直接从本部分的第一节开始讲（第一句仍要是自然的口语过渡句），不要开场白，"
+                         "不要复述或总结前面部分的内容，结尾不要全文总结。\n")
+        else:
+            part_note = (f"【分块说明】这是原文的最后第 {part_idx}/{part_total} 部分，前面部分已讲完。"
+                         "请直接从本部分的第一节开始讲，不要开场白，不要复述前面内容；"
+                         "本部分讲完后可以用一两句自然的口语收尾。\n")
+
+    return (
         f"请为以下文档生成约 {duration_label} 的讲解稿（覆盖优先，时长可略超）。\n\n"
         f"讲解主题：{topic if topic else '（请根据内容确定合适的主题）'}\n\n"
-        f"===== 文档内容 =====\n{clipped}\n===== 结束 =====\n\n"
+        f"{part_note}"
+        f"===== 文档内容 =====\n{doc_text}\n===== 结束 =====\n\n"
         "请按 NDJSON 格式逐行输出，每行一个 JSON。"
     )
 
+
+def _openai_stream(messages):
     stream = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        messages=messages,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         temperature=0.7,
         max_tokens=16000,
         stream=True,
     )
-
     for chunk in stream:
         delta = chunk.choices[0].delta.content
         if delta:
             yield delta
+
+
+def generate_script_timeline_stream(content, topic="", length="medium"):
+    """流式生成带时间轴的讲解稿（NDJSON：每行 {text, anchor, pause?, key?, op?}）。
+
+    时间戳由前端按音频时长计算，模型只输出句子、文档锚点、节奏标记（pause/key）与视觉操作。
+    op 决定该句朗读时画面上的动作：无操作 / 高亮 / 下划线 / 删除线 / 批注，
+    批注级别最高，只给最重要的知识点。target 必须是文档原文的连续子串。
+
+    超过 MAX_CONTENT_CHARS 的文档按标题分块逐块生成再拼接，保证全文覆盖而不是截断。
+    Yields: 模型输出的原始文本片段
+    """
+    duration_label = LENGTH_MAP.get(length, "10-15分钟")
+    system = _timeline_system_prompt()
+
+    chunks = _split_into_chunks(content)
+    total = len(chunks)
+    for i, chunk in enumerate(chunks, start=1):
+        user = _timeline_user_prompt(
+            duration_label if total == 1 else "对应本部分篇幅",
+            topic,
+            chunk,
+            part_idx=i,
+            part_total=total,
+        )
+        last_char = "\n"
+        for piece in _openai_stream([
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]):
+            if piece:
+                last_char = piece[-1]
+                yield piece
+        # 每块都是独立的一次模型调用。模型若漏掉末尾换行，直接拼接会把
+        # 两个 JSON 对象粘成一行，令前端 NDJSON 解析丢失该句。
+        if i < total and last_char not in "\r\n":
+            yield "\n"
 
 
 if __name__ == "__main__":

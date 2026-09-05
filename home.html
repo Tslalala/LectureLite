@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的主页 — LectureLite</title>
+<style>
+:root{
+  --bg:#f6f6f3; --surface:#fff; --surface2:#f0f0ec; --line:#e7e7e2; --line2:#d8d8d2;
+  --fg:#1f1f1c; --dim:#8b8b84; --dim2:#b3b3ac;
+  --acc:#2f6db4; --acc-soft:#eef4fb; --rec:#b54038;
+  --gold:#b98a1d; --gold-soft:#faf3e0;
+  --shadow-sm:0 1px 2px rgba(30,30,25,.05),0 2px 8px rgba(30,30,25,.04);
+  --shadow-md:0 2px 6px rgba(30,30,25,.06),0 12px 32px rgba(30,30,25,.08);
+  --radius:14px;
+}
+*{ box-sizing:border-box; }
+html{ -webkit-font-smoothing:antialiased; }
+body{ margin:0; background:
+    radial-gradient(1200px 500px at 85% -10%, #eef1ea 0%, transparent 60%),
+    var(--bg);
+  color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+
+/* ── 顶栏 ── */
+header{ display:flex; align-items:center; gap:14px; padding:16px 32px;
+  background:rgba(255,255,255,.82); backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; }
+.logo{ width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,#c4423a,#8e2e28);
+  color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700;
+  box-shadow:var(--shadow-sm); }
+.brand{ display:flex; flex-direction:column; gap:1px; }
+.wordmark{ height:22px; width:auto; display:block; }
+.brand small{ font-size:11px; letter-spacing:.14em; color:var(--dim2); }
+header .spacer{ flex:1; }
+#who{ display:flex; align-items:center; gap:8px; color:var(--dim); font-size:13px; }
+#who .avatar{ width:26px; height:26px; border-radius:50%; background:var(--acc-soft); color:var(--acc);
+  display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:700; }
+.btn{ padding:7px 15px; border:1px solid var(--line2); border-radius:9px; background:var(--surface);
+  color:var(--fg); font-size:13px; cursor:pointer; text-decoration:none; transition:all .15s; }
+.btn:hover{ background:var(--surface2); border-color:#c9c9c2; }
+
+main{ max-width:820px; margin:0 auto; padding:34px 24px 80px; }
+
+/* ── 分区标题 ── */
+.sec-head{ display:flex; align-items:baseline; gap:10px; margin:34px 0 12px; }
+.sec-head:first-child{ margin-top:6px; }
+.sec-head h2{ margin:0; font-size:15.5px; font-weight:700; letter-spacing:-.01em; }
+.sec-head .count{ font-size:12px; color:var(--dim2); font-weight:600; }
+.sec-head .hint{ font-size:12px; color:var(--dim2); margin-left:auto; }
+
+/* ── 课程卡片 ── */
+ul.list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px 18px; box-shadow:var(--shadow-sm); transition:box-shadow .18s, transform .18s, border-color .18s; }
+.card:hover{ box-shadow:var(--shadow-md); transform:translateY(-1px); border-color:#d0d0c9; }
+.card .row{ display:flex; align-items:center; gap:12px; }
+.card .grow{ flex:1; min-width:0; }
+.play-dot{ flex-shrink:0; width:34px; height:34px; border-radius:50%; border:0; cursor:pointer;
+  background:var(--acc-soft); color:var(--acc); font-size:13px; display:flex; align-items:center; justify-content:center;
+  transition:all .15s; }
+.play-dot:hover{ background:var(--acc); color:#fff; transform:scale(1.06); }
+.rec-title{ font-size:14.5px; font-weight:650; cursor:pointer; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; letter-spacing:-.005em; }
+.rec-title:hover{ color:var(--acc); }
+.rec-meta{ display:flex; gap:10px; color:var(--dim); font-size:12px; margin-top:3px; align-items:center; flex-wrap:wrap; }
+.rec-meta .dot::before{ content:'·'; }
+.badge{ flex-shrink:0; font-size:11px; font-weight:650; padding:3px 9px; border-radius:999px; letter-spacing:.02em; }
+.badge.demo{ color:var(--gold); background:var(--gold-soft); border:1px solid #eadfbe; }
+.badge.owner{ color:var(--acc); background:var(--acc-soft); border:1px solid #d7e5f5; }
+.badge.trash{ color:#8a4a46; background:#f9efee; border:1px solid #ecd3d1; }
+.star{ flex-shrink:0; border:0; background:none; font-size:17px; cursor:pointer; color:var(--dim2);
+  padding:2px 4px; transition:transform .15s, color .15s; }
+.star:hover{ transform:scale(1.15); }
+.star.on{ color:#dda615; }
+.mini{ padding:4px 11px; font-size:12px; border:1px solid var(--line2); border-radius:7px;
+  background:var(--surface); cursor:pointer; color:var(--fg); transition:all .15s; }
+.mini:hover{ background:var(--surface2); }
+.mini.danger{ color:#a03a32; border-color:#e3c8c5; }
+.mini.danger:hover{ background:#f9efee; }
+button:disabled{ opacity:.4; cursor:not-allowed; }
+
+/* 进度条 */
+.prog{ height:4px; background:var(--surface2); border-radius:3px; margin-top:11px; overflow:hidden; }
+.prog > div{ height:100%; background:linear-gradient(90deg,var(--acc),#5a92cf); border-radius:3px; }
+
+/* 展开的操作区 */
+.sub{ display:none; margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);
+  align-items:center; gap:8px; flex-wrap:wrap; }
+.sub.show{ display:flex; }
+.sub input{ padding:5px 10px; font-size:12.5px; border:1px solid var(--line2); border-radius:7px;
+  background:var(--surface2); color:var(--fg); }
+.sub input.uid-in{ width:120px; }
+.sub input.link-in{ flex:1; min-width:200px; color:var(--dim); }
+.links{ width:100%; display:flex; flex-direction:column; gap:5px; }
+.links .lrow{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); }
+.toggle-more{ border:0; background:none; color:var(--dim); font-size:12px; cursor:pointer; padding:4px 2px; }
+.toggle-more:hover{ color:var(--fg); }
+
+.empty{ color:var(--dim2); font-size:13px; padding:26px 16px; text-align:center;
+  border:1.5px dashed var(--line2); border-radius:var(--radius); background:rgba(255,255,255,.5); }
+
+/* 回收站 */
+#trashSec details{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow-sm); }
+#trashSec summary{ cursor:pointer; padding:13px 18px; font-size:13.5px; font-weight:650;
+  color:var(--dim); list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+#trashSec summary::-webkit-details-marker{ display:none; }
+#trashSec summary .arrow{ transition:transform .18s; font-size:11px; }
+#trashSec details[open] summary .arrow{ transform:rotate(90deg); }
+#trashSec .inner{ padding:0 12px 12px; }
+.trash-note{ font-size:12px; color:var(--dim2); padding:4px 8px 8px; }
+
+/* 状态条 */
+#status{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(8px);
+  background:#26261f; color:#f5f5f0; font-size:12.5px; padding:9px 18px; border-radius:999px;
+  opacity:0; transition:all .25s; pointer-events:none; max-width:80vw; box-shadow:var(--shadow-md); z-index:60; }
+#status.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* 登录浮层 */
+#authGate{ position:fixed; inset:0; z-index:90; display:none; align-items:center; justify-content:center;
+  background:rgba(244,244,240,.9); backdrop-filter:blur(8px); }
+#authGate.show{ display:flex; }
+#authGate .card{ width:330px; background:var(--surface); border:1px solid var(--line);
+  border-radius:18px; padding:30px 30px 24px; box-shadow:var(--shadow-md); }
+#authGate .wordmark-lg{ height:24px; width:auto; margin:0 0 12px; }
+#authGate .logo{ display:none; }
+#authGate h2{ margin:0 0 4px; font-size:19px; font-weight:700; }
+#authGate .sub0{ color:var(--dim); font-size:12.5px; margin:0 0 18px; }
+#authGate label{ display:block; font-size:12px; color:var(--dim); margin:12px 0 5px; }
+#authGate input{ width:100%; padding:9px 12px; border:1px solid var(--line2); border-radius:9px;
+  background:var(--surface2); color:var(--fg); font-size:14px; }
+#authGate input:focus{ outline:none; border-color:var(--acc); background:#fff; }
+#authErr{ color:#b3362d; font-size:12.5px; min-height:18px; margin:10px 0 6px; }
+#authSubmit{ width:100%; padding:10px 0; border:0; border-radius:9px; background:var(--rec);
+  color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
+#authSubmit:hover{ filter:brightness(.95); }
+.hidden{ display:none; }
+</style>
+<link rel="stylesheet" href="tools/home.css">
+</head>
+<body>
+<header>
+  <div class="brand"><img src="docs/logo.png" alt="LectureLite" class="wordmark"><small>个人课程库</small></div>
+  <span class="spacer"></span>
+  <span id="who"></span>
+  <a class="btn" href="/lecture-lite.html">新建讲解</a>
+  <button id="logoutBtn" class="btn hidden">退出</button>
+</header>
+<main>
+<section class="library-intro"><div><p class="eyebrow">你的知识，值得被听见</p><h2>把讲解留在这里。</h2><p>整理自己的录制，继续上次的学习，也把理解分享给别人。</p></div><a class="btn create" href="/lecture-lite.html">＋ 新建讲解</a></section>
+<nav class="library-nav" aria-label="课程分类"><button data-view="mine">我的录制</button><button data-view="favs">收藏的课程</button><button data-view="shared">分享给我的</button><button data-view="trash">回收站</button></nav>
+<div class="library-filter"><input id="courseSearch" aria-label="搜索课程" type="search" placeholder="搜索课程名称或作者"><select id="courseSort" aria-label="排序"><option value="recent">最近更新</option><option value="title">名称顺序</option></select><span id="librarySummary" role="status"></span><button class="mini" id="reloadLibrary">刷新</button></div>
+  <div class="sec-head"><h2>收藏的课程</h2><span class="count" id="cntFavs"></span><span class="hint">☆ 可在播放页随时收藏</span></div>
+  <ul class="list" id="secFavs"></ul>
+
+  <div class="sec-head"><h2>分享给我的</h2><span class="count" id="cntShared"></span></div>
+  <ul class="list" id="secShared"></ul>
+
+  <div class="sec-head"><h2>我的录制</h2><span class="count" id="cntMine"></span></div>
+  <ul class="list" id="secMine"></ul>
+
+  <div class="sec-head"><h2>回收站</h2><span class="hint">删除的录制保留 30 天，到期自动清空</span></div>
+  <div id="trashSec"><details><summary><span class="arrow">▶</span>已删除的录制<span id="cntTrash"></span></summary>
+    <div class="inner">
+      <div class="trash-note">恢复后回到「我的录制」；彻底删除后无法找回。</div>
+      <ul class="list" id="secTrash"></ul>
+    </div>
+  </details></div>
+</main>
+<div id="status" role="status" aria-live="polite"></div>
+
+<div id="authGate">
+  <div class="card">
+    <div class="logo">L</div>
+    <img src="docs/logo.png" alt="LectureLite" class="wordmark-lg">
+    <p class="sub0">登录后查看你的录制、分享与收藏</p>
+    <form id="authForm">
+      <label for="authUid">UID</label>
+      <input type="text" id="authUid" autocomplete="username" required>
+      <label for="authPwd">密码</label>
+      <input type="password" id="authPwd" autocomplete="current-password" required>
+      <div id="authErr"></div>
+      <button type="submit" id="authSubmit">登录</button>
+    </form>
+    <p class="sub0" style="margin:14px 0 0">没有账号？<a href="/lecture-lite.html">去编辑器页面注册</a></p>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let me = null;
+function apiJSON(url, opts){
+  return fetch(url, opts).then(async res => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  });
+}
+let statusTimer = null;
+function status(msg){
+  const el = $('status');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+function fmtMs(ms){
+  if (!ms || ms < 0) return '';
+  const s = Math.floor(ms / 1000);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function fmtDate(ts){
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function daysLeft(deletedAt){
+  if (!deletedAt) return 30;
+  const left = 30 - (Date.now() / 1000 - deletedAt) / 86400;
+  return Math.max(0, Math.ceil(left));
+}
+function openUrl(it){
+  let u = '/lecture-lite.html?src=' + encodeURIComponent('/api/recordings/' + it.id + '/file');
+  if (it.progress_ms > 0) u += '&pos=' + it.progress_ms;
+  location.href = u;
+}
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+async function toggleFav(it){
+  try {
+    const r = await apiJSON('/api/recordings/' + it.id + '/favorite', { method: 'POST' });
+    it.favorite = r.favorite;
+    status(r.favorite ? '已收藏' : '已取消收藏');
+    render();
+  } catch(err){ status('收藏失败：' + err.message); }
+}
+async function deleteRec(it){
+  if (!confirm('把「' + (it.title || '未命名') + '」移入回收站？\n30 天内可恢复，到期自动清空。')) return;
+  try {
+    await apiJSON('/api/recordings/' + it.id + '/delete', { method: 'POST' });
+    status('已移入回收站（30 天内可恢复）');
+    render();
+  } catch(err){ status('删除失败：' + err.message); }
+}
+async function restoreRec(it){
+  try {
+    await apiJSON('/api/recordings/' + it.id + '/restore', { method: 'POST' });
+    status('已恢复到「我的录制」');
+    render();
+  } catch(err){ status('恢复失败：' + err.message); }
+}
+async function purgeRec(it){
+  if (!confirm('彻底删除「' + (it.title || '未命名') + '」？此操作无法撤销。')) return;
+  try {
+    await apiJSON('/api/recordings/' + it.id + '/purge', { method: 'POST' });
+    status('已彻底删除');
+    render();
+  } catch(err){ status('删除失败：' + err.message); }
+}
+async function shareTo(it, inp){
+  const uid = inp.value.trim();
+  if (!uid){ status('请输入对方 UID'); return; }
+  try {
+    await apiJSON('/api/recordings/' + it.id + '/share', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid }),
+    });
+    inp.value = '';
+    status('已分享给 ' + uid);
+  } catch(err){ status('分享失败：' + err.message); }
+}
+async function createLink(it, box, days){
+  try {
+    const r = await apiJSON('/api/recordings/' + it.id + '/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({days}),
+    });
+    box.classList.add('show');
+    const inp = box.querySelector('.link-in');
+    inp.value = r.url;
+    inp.select();
+    let copied = false;
+    try { await navigator.clipboard.writeText(r.url); copied = true; } catch(e){}
+    status(copied ? '链接已复制；可在下方撤销访问' : '链接已生成，请手动复制');
+    const revoke = el('button', 'mini', '撤销此链接');
+    revoke.onclick = () => revokeLink(it, r.sid);
+    box.appendChild(revoke);
+  } catch(err){ status('生成失败：' + err.message); }
+}
+async function revokeLink(it, sid){
+  try {
+    await apiJSON('/api/recordings/link/' + sid + '/revoke', { method: 'POST' });
+    status('链接已吊销');
+    render();
+  } catch(err){ status('吊销失败：' + err.message); }
+}
+function renderItem(it, opts){
+  const li = el('li', 'card');
+  const row = el('div', 'row');
+  // 播放按钮
+  const play = el('button', 'play-dot', '▶');
+  play.title = '播放';
+  play.addEventListener('click', () => openUrl(it));
+  row.appendChild(play);
+
+  const grow = el('div', 'grow');
+  const trow = el('div');
+  const title = el('button', 'rec-title', (it.title || '(未命名)').replace(/\.lecture\.zip$/i,''));
+  title.title = '点击打开播放';
+  title.addEventListener('click', () => openUrl(it));
+  trow.appendChild(title);
+  if (it.demo) trow.appendChild(el('span', 'badge demo', '示例'));
+  else if (opts.showOwner) trow.appendChild(el('span', 'badge owner', it.owner));
+  grow.appendChild(trow);
+  const meta = el('div', 'rec-meta');
+  meta.appendChild(el('span', null, fmtDate(it.created)));
+  if (it.progress_ms > 0){
+    const p = el('span', 'dot', '上次看到 ' + fmtMs(it.progress_ms));
+    p.title = '打开后从上次位置继续播放';
+    meta.appendChild(p);
+  }
+  grow.appendChild(meta);
+  row.appendChild(grow);
+
+  // 收藏星（示例课程锁定为已收藏）
+  const star = el('button', 'star' + (it.favorite ? ' on' : ''), it.favorite ? '★' : '☆');
+  star.title = it.demo ? '示例课程默认收藏' : (it.favorite ? '取消收藏' : '收藏');
+  if (it.demo){ star.disabled = true; }
+  else star.addEventListener('click', () => toggleFav(it));
+  row.appendChild(star);
+
+  if (opts.trash){ play.disabled = true; title.disabled = true; star.hidden = true; }
+  li.appendChild(row);
+  if (it.progress_ms > 0 && it.duration_ms > 0){
+    const bar = el('div', 'prog');
+    const fill = el('div');
+    fill.style.width = Math.min(100, it.progress_ms / it.duration_ms * 100) + '%';
+    bar.appendChild(fill);
+    li.appendChild(bar);
+  }
+
+  // 回收站行：恢复 / 彻底删除
+  if (opts.trash){
+    const sub = el('div', 'sub show');
+    sub.appendChild(el('span', 'badge trash', daysLeft(it.deleted_at) + ' 天后自动清空'));
+    const rs = el('button', 'mini', '恢复');
+    rs.addEventListener('click', () => restoreRec(it));
+    const pg = el('button', 'mini danger', '彻底删除');
+    pg.addEventListener('click', () => purgeRec(it));
+    sub.appendChild(rs); sub.appendChild(pg);
+    li.appendChild(sub);
+    return li;
+  }
+
+  // 我的录制：展开式操作区
+  if (opts.mine){
+    const more = el('button', 'toggle-more', '分享与管理');
+    more.addEventListener('click', () => {
+      sub.classList.toggle('show');
+      more.textContent = sub.classList.contains('show') ? '收起管理' : '分享与管理';
+    });
+    row.appendChild(more);
+    const sub = el('div', 'sub');
+    const inp = el('input', 'uid-in'); inp.placeholder = '对方 UID';
+    const sb = el('button', 'mini', '分享给');
+    sb.addEventListener('click', () => shareTo(it, inp));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') shareTo(it, inp); });
+    sub.appendChild(inp); sub.appendChild(sb);
+    const lb = el('button', 'mini', '生成分享链接');
+    const expiry = el('select','mini'); expiry.setAttribute('aria-label','分享链接有效期');
+    for(const [value,label] of [['7','7 天有效'],['1','1 天有效'],['30','30 天有效'],['0','长期有效']]){const option=el('option',null,label);option.value=value;expiry.appendChild(option);}
+    sub.appendChild(expiry);
+    lb.title = '创建无需登录、凭链接即可观看的 unlisted 链接（可吊销）';
+    const box = el('div', 'sub');
+    const linp = el('input', 'link-in'); linp.readOnly = true; linp.placeholder = '生成的链接只完整显示一次';
+    const cp = el('button', 'mini', '复制');
+    cp.addEventListener('click', async () => { if(!linp.value)return;try{await navigator.clipboard.writeText(linp.value);status('已复制');}catch(e){linp.select();status('请手动复制选中的链接');} });
+    box.appendChild(linp); box.appendChild(cp);
+    const links = el('div', 'links');
+    lb.addEventListener('click', async () => {lb.disabled=true;try{await createLink(it, box, Number(expiry.value));}finally{lb.disabled=false;}});
+    sub.appendChild(lb);
+    const del = el('button', 'mini danger', '删除');
+    del.addEventListener('click', () => deleteRec(it));
+    sub.appendChild(del);
+    sub.appendChild(box); sub.appendChild(links); li.appendChild(sub);
+    apiJSON('/api/recordings/' + it.id + '/links').then(r => {
+      const active = r.links.filter(l => !l.revoked);
+      if (!active.length) return;
+      for (const l of active){
+        const lrow = el('div', 'lrow');
+        lrow.appendChild(el('span', null, '链接 ' + l.sid + ' · ' + fmtDate(l.created)
+          + (l.expires_at ? ' · 有效期至 ' + fmtDate(l.expires_at) : '')));
+        const rv = el('button', 'mini', '吊销');
+        rv.addEventListener('click', () => revokeLink(it, l.sid));
+        lrow.appendChild(rv);
+        links.appendChild(lrow);
+      }
+    }).catch(() => {});
+  }
+  return li;
+}
+function fill(ulId, cntId, list, opts){
+  const ul = $(ulId);
+  ul.innerHTML = '';
+  if (cntId) $(cntId).textContent = list.length ? String(list.length) : '';
+  if (!list.length){
+    ul.appendChild(el('li', 'empty', $('courseSearch').value.trim() ? '没有匹配的课程。试试更短的关键词，或清空搜索。' : opts.empty));
+    return;
+  }
+  for (const it of list) ul.appendChild(renderItem(it, opts));
+}
+let library = null, loadRevision = 0;
+let activeView = ['mine','favs','shared','trash'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'mine';
+function applyLibraryView(){
+  for (const [key,id] of Object.entries({favs:'secFavs',shared:'secShared',mine:'secMine',trash:'trashSec'})){
+    $(id).hidden = key !== activeView;
+    $(id).previousElementSibling.hidden = key !== activeView;
+  }
+  document.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('selected', b.dataset.view === activeView); b.setAttribute('aria-current', b.dataset.view === activeView ? 'page' : 'false'); });
+}
+async function render(){
+  const revision = ++loadRevision;
+  let data;
+  try { data = await apiJSON('/api/recordings'); if (revision !== loadRevision) return; library = data; }
+  catch(err){
+    if (String(err.message).includes('未登录') || String(err.message).includes('401')){ showAuth(true); return; }
+    status('获取主页失败：' + err.message); return;
+  }
+  $('who').innerHTML = '';
+  const av = el('span', 'avatar', (me || '?').slice(0, 1).toUpperCase());
+  $('who').appendChild(av);
+  $('who').appendChild(el('span', null, me));
+  $('logoutBtn').classList.toggle('hidden', !me);
+  drawLibrary();
+}
+function drawLibrary(){
+  const data = library; if (!data) return;
+  const q = $('courseSearch').value.trim().toLocaleLowerCase();
+  const filter = xs => (xs || []).filter(x => !q || ((x.title || '')+' '+(x.owner || '')).toLocaleLowerCase().includes(q)).sort((a,b) => $('courseSort').value === 'title' ? (a.title || '').localeCompare(b.title || '', 'zh-CN') : (b.updated || b.created) - (a.updated || a.created));
+  const mine = filter(data.mine), shared = filter(data.shared), favs = filter(data.favorites), trash = filter(data.trash);
+  $('librarySummary').textContent = '共 ' + ({mine,shared,favs,trash}[activeView].length) + ' 个课程';
+  // 收藏里示例排前面
+  favs.sort((a, b) => (b.demo ? 1 : 0) - (a.demo ? 1 : 0));
+  fill('secFavs', 'cntFavs', favs, { showOwner: true, empty: '还没有收藏 — 播放时点「☆ 收藏」，或在下面打开示例课程看看' });
+  fill('secShared', 'cntShared', shared, { showOwner: true, empty: '暂时没有别人分享给你的录制' });
+  fill('secMine', 'cntMine', mine, { mine: true, empty: '还没有课程。点击「新建讲解」，完成后选择「保存到主页」。' });
+  $('cntTrash').textContent = trash.length ? '（' + trash.length + '）' : '';
+  fill('secTrash', null, trash, { trash: true, empty: '回收站是空的' });
+  $('trashSec').querySelector('details').open = true;
+  applyLibraryView();
+}
+document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { activeView = b.dataset.view; history.replaceState(null, '', '#'+activeView); drawLibrary(); applyLibraryView(); }));
+$('courseSearch').addEventListener('input', drawLibrary);
+$('courseSort').addEventListener('change', drawLibrary);
+$('reloadLibrary').addEventListener('click', render);
+applyLibraryView();
+function showAuth(on){ $('authGate').classList.toggle('show', on); }
+$('authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('authErr').textContent = '';
+  try {
+    const data = await apiJSON('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: $('authUid').value.trim(), password: $('authPwd').value }),
+    });
+    me = data.uid;
+    showAuth(false);
+    render();
+  } catch(err){ $('authErr').textContent = err.message; }
+});
+$('logoutBtn').addEventListener('click', async () => {
+  try { await apiJSON('/api/logout', { method: 'POST' }); } catch(e){}
+  me = null; library = null;
+  for (const id of ['secMine','secFavs','secShared','secTrash']) $(id).replaceChildren();
+  showAuth(true);
+  $('who').textContent = '';
+  $('logoutBtn').classList.add('hidden');
+});
+(async function init(){
+  try { me = (await apiJSON('/api/me')).uid; }
+  catch(e){ me = null; showAuth(true); return; }
+  render();
+})();
+</script>
+</body>
+</html>

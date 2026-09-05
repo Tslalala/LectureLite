@@ -5,3 +5,6 @@ __pycache__/
 shared/
 chrome-test/
 cert/
+demo/.guide-audio/
+# 账号密码哈希、会话及个人课程关系（仅保存在本机）
+data/

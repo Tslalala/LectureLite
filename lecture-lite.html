@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' blob: https://cdn.jsdelivr.net; frame-src blob:; object-src 'none'; base-uri 'none'">
 <title>LectureLite — 文件 + 音频 + 操作时间轴</title>
 <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -16,6 +17,7 @@
 <script src="tools/question.js"></script>
 <script src="tools/sticker.js"></script>
 <script src="tools/selection-toolbar.js"></script>
+<script src="tools/html-presenter.js"></script>
 <style>
 :root{
   --bg:#FAFAF8; --surface:#FFFFFF; --surface2:#F4F4F1;
@@ -33,9 +35,11 @@ body{ margin:0; background:var(--bg); color:var(--fg);
   -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; }
 
 /* —— toolbar —— */
-header{ flex-shrink:0; display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 24px;
+header{ flex-shrink:0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:5px 20px;
   background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; }
-h1{ font-size:17px; margin:0 16px 0 0; white-space:nowrap; font-weight:600; letter-spacing:-.01em; }
+h1{ margin:0 16px 0 0; white-space:nowrap; display:flex; align-items:center; gap:10px; }
+.wordmark{ height:15px; width:auto; display:block; }
+h1 small, h1 .sub{ font-size:12px; color:var(--dim2); font-weight:400; letter-spacing:.02em; }
 h1 small{ color:var(--dim2); font-weight:400; margin-left:8px; font-size:14px; letter-spacing:0; }
 
 button{ background:var(--surface); color:var(--fg); border:1px solid var(--line);
@@ -49,7 +53,9 @@ button.primary:hover:not(:disabled){ background:var(--acc2); border-color:var(--
 button.primary:active:not(:disabled){ background:#0f0f0f; }
 
 /* mode toggle — 圆形, 选中时暗红 */
-#modeRec,#modePlay{ border-radius:999px; padding:8px 24px; font-size:15px; }
+#modeRec,#modePlay{ border-radius:999px; padding:4px 18px; font-size:14px; }
+header > button, header .bar button{ padding:4px 12px; font-size:13.5px; }
+header .bar button.src-btn{ padding:4px 12px; font-size:13.5px; }
 #modeRec.primary,#modePlay.primary{ background:var(--rec); border-color:var(--rec); color:#fff; }
 #modeRec.primary:hover,#modePlay.primary:hover{ background:#a83a32; border-color:#a83a32; }
 #modeRec.primary:active,#modePlay.primary:active{ background:#8e2e28; }
@@ -84,6 +90,28 @@ label input[type=checkbox]{ accent-color:var(--acc); }
 
 #status{ color:var(--dim); font-size:14px; margin-left:auto; max-width:420px;
   text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#status.err{ color:var(--rec); }
+
+/* 全局细节：选中文字的颜色与录制选区呼应；键盘可达性 */
+::selection{ background:rgba(196,66,58,.16); }
+button:focus-visible,.tab:focus-visible,.src-btn:focus-visible{ outline:2px solid rgba(26,26,26,.45); outline-offset:2px; }
+
+/* —— 顶部工具栏收起：收起后 .bar 变为覆盖层，悬停页面顶部临时展开 —— */
+#toolbarToggle{ margin-left:12px; width:30px; height:30px; padding:0; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center; color:var(--dim); flex-shrink:0; }
+#toolbarToggle svg{ display:block; transition:transform .18s ease; }
+header.collapsed #toolbarToggle svg{ transform:rotate(180deg); }
+header.collapsed .bar{ position:absolute; top:100%; left:0; right:0; z-index:9;
+  margin-top:0; padding:12px 24px; background:var(--surface);
+  border-bottom:1px solid var(--line); box-shadow:0 12px 28px rgba(20,20,18,.10);
+  opacity:0; visibility:hidden;
+  transition:opacity .15s ease .3s, visibility 0s linear .45s; }
+header.collapsed:hover .bar, header.collapsed:focus-within .bar{
+  opacity:1; visibility:visible; transition:opacity .15s ease 0s; }
+
+/* 收起时也要能看到录制状态：行内录制徽标 */
+#recBadge{ display:none; align-items:center; color:var(--dim); font-size:12px; margin-left:10px; }
+header.collapsed.recording #recBadge{ display:inline-flex; }
 
 .bar{ display:none; flex-wrap:wrap; gap:10px; align-items:center; width:100%;
   padding-top:12px; margin-top:2px; border-top:1px solid var(--line); }
@@ -121,23 +149,46 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #tabbar{ padding-right:4px; }
 
 /* —— 工作区主体：目录 + 文档 —— */
-#workarea{ flex:1; display:flex; min-height:0; }
+#workarea{ flex:1; display:flex; min-height:0; position:relative; }
+/* 空状态引导（未加载任何文件时） */
+#emptyState{ position:absolute; inset:0; z-index:3; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:4px; text-align:center;
+  padding:20px; color:var(--dim2); pointer-events:none; user-select:none; }
+#emptyState svg{ width:44px; height:44px; stroke:var(--line2); margin-bottom:10px; }
+#emptyState .empty-title{ margin:0; font-size:15px; font-weight:500; color:var(--dim); }
+#emptyState .empty-sub{ margin:0; font-size:12.5px; max-width:360px; line-height:1.8; }
+#emptyState kbd, #intro kbd{ background:var(--surface2); border:1px solid var(--line); border-bottom-width:2px;
+  border-radius:4px; padding:0 5px; font-size:11px; font-family:inherit; }
 #toc{ flex-shrink:0; width:200px; overflow:auto; background:var(--surface2);
   border-right:1px solid var(--line); padding:14px 12px; font-size:13px;
   border:1px solid var(--line); border-top:none; border-right-width:0; }
 #toc-title{ font-size:12px; color:var(--dim2); font-weight:600; letter-spacing:.05em;
-  margin:0 0 10px; text-transform:uppercase; }
-#toc .toc-item{ display:block; padding:4px 6px; color:var(--dim); cursor:pointer;
-  line-height:1.5; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-#toc .toc-item:hover{ background:rgba(0,0,0,.06); color:var(--fg); }
-#toc .toc-item.h1{ font-weight:600; color:var(--fg); }
-#toc .toc-item.h2{ padding-left:16px; }
-#toc .toc-item.h3{ padding-left:30px; font-size:12.5px; }
-#toc .toc-item.active{ background:rgba(0,0,0,.1); color:var(--acc); }
-#toc .toc-page{ display:block; padding:4px 6px; color:var(--dim); cursor:pointer;
-  line-height:1.5; border-radius:4px; }
-#toc .toc-page:hover{ background:rgba(0,0,0,.06); color:var(--fg); }
-#toc .toc-page.active{ background:rgba(0,0,0,.1); color:var(--acc); }
+  margin:0; text-transform:uppercase; }
+#toc-head{ display:flex; align-items:center; justify-content:space-between; margin:0 0 10px; }
+#tocCollapse{ border:0; background:none; cursor:pointer; color:var(--dim2); font-size:13px;
+  line-height:1; padding:2px 4px; border-radius:4px; }
+#tocCollapse:hover{ color:var(--fg); background:rgba(0,0,0,.06); }
+#toc.collapsed{ width:40px; padding:14px 6px; }
+#toc.collapsed #toc-title{ display:none; }
+#toc.collapsed #tocCollapse{ transform:scaleX(-1); }
+#toc.collapsed .toc-row, #toc.collapsed .toc-empty, #toc.collapsed .toc-branch{ display:none; }
+#toc .toc-empty{ color:var(--dim2); font-size:12px; padding:8px 6px; }
+#toc .toc-row{ display:flex; align-items:center; gap:2px; padding:3px 4px; color:var(--dim);
+  cursor:pointer; line-height:1.5; border-radius:4px; }
+#toc .toc-row:hover{ background:rgba(0,0,0,.06); color:var(--fg); }
+#toc .toc-row.h1{ font-weight:600; color:var(--fg); }
+#toc .toc-row.h2{ padding-left:18px; }
+#toc .toc-row.h3{ padding-left:32px; font-size:12.5px; }
+#toc .toc-row.active{ background:rgba(0,0,0,.1); color:var(--acc); }
+#toc .toc-text{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#toc .toc-fold{ flex-shrink:0; display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; padding:0; border:none; background:none; border-radius:3px;
+  color:var(--dim2); cursor:pointer; }
+#toc .toc-fold:hover{ background:rgba(0,0,0,.08); color:var(--fg); }
+#toc .toc-fold.ghost{ visibility:hidden; pointer-events:none; }
+#toc .toc-fold svg{ transform:rotate(90deg); transition:transform .15s ease; }
+#toc .toc-branch.folded > .toc-row .toc-fold svg{ transform:rotate(0deg); }
+#toc .toc-branch.folded > .toc-branch{ display:none; }
 
 #viewer{ flex:1; overflow:auto; background:#fff;
   border-radius:0 0 12px 0; position:relative;
@@ -205,13 +256,25 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #scriptTtsRow label{ font-size:12px; display:inline-flex; align-items:center; gap:4px; }
 #scriptTtsRow select{ font-size:12px; padding:3px 6px; border-radius:5px; }
 #scriptTtsRow input[type=range]{ width:70px; height:3px; accent-color:var(--acc); }
-.script-line{ display:flex; gap:8px; padding:5px 0; border-bottom:1px dashed var(--line);
+.script-line{ display:flex; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line);
   line-height:1.6; cursor:default; border-radius:3px; transition:background .15s; }
 .script-line .script-t{ flex-shrink:0; font-size:12px; color:var(--dim2); font-variant-numeric:tabular-nums;
   padding-top:2px; min-width:40px; user-select:none; }
-.script-line .script-s{ flex:1; }
+.script-line .script-main{ flex:1; min-width:0; }
+.script-row{ display:flex; align-items:flex-start; gap:6px; }
+.script-row .script-s{ flex:1; min-width:0; }
 .script-line.active{ background:rgba(196,66,58,.10); }
 .script-line.active .script-t{ color:var(--rec); font-weight:600; }
+/* 讲稿标记：文字化 badge（重点 / 停顿 / 高亮…），生成与录制时一眼可读 */
+.script-badge{ flex-shrink:0; margin-top:2px; font-size:11px; line-height:1; padding:3px 6px;
+  border:1px solid var(--line); border-radius:4px; color:var(--dim); background:var(--surface2);
+  white-space:nowrap; user-select:none; }
+.script-badge.key{ color:var(--rec); border-color:rgba(196,66,58,.35); background:rgba(196,66,58,.06); font-weight:600; }
+/* 该句要写的批注内容直接铺在句下，生成 / 录制时不用悬停就能看到 */
+.script-note{ margin-top:4px; font-size:12.5px; line-height:1.55; color:var(--dim);
+  background:var(--surface2); padding:4px 9px;
+  border-radius:4px; overflow-wrap:anywhere; }
+.script-note::before{ content:'批注'; font-size:10.5px; color:var(--dim2); letter-spacing:.08em; margin-right:6px; }
 
 /* —— playback overlays —— */
 #cursor{ position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border-radius:50%;
@@ -259,35 +322,77 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #intro.show{ display:flex; }
 #intro .card{ background:var(--surface); border:1px solid var(--line); border-radius:12px;
   padding:36px 40px; max-width:560px; }
-#intro h2{ margin:0 0 10px; font-size:18px; font-weight:600; letter-spacing:-.01em; }
+#intro h2{ margin:0 0 10px; }
 #intro p{ margin:0 0 4px; }
 #intro ol{ margin:14px 0 18px; padding-left:20px; color:var(--dim); font-size:13px; line-height:1.7; }
 #intro li{ margin:6px 0; }
 #intro b{ color:var(--fg); font-weight:600; }
 #intro code{ background:var(--surface2); border:1px solid var(--line);
   padding:1px 5px; border-radius:4px; font-size:12px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+
+/* —— 拖拽文件/文件夹覆盖层 —— */
+#dropZone{ position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center;
+  background:rgba(250,250,248,.72); pointer-events:none; }
+#dropZone.show{ display:flex; }
+#dropZone .box{ border:1.5px dashed var(--line2); border-radius:12px; padding:22px 44px;
+  background:var(--surface); color:var(--dim); font-size:14px;
+  box-shadow:0 12px 32px rgba(20,20,18,.08); }
+
+/* —— 登录 / 注册浮层 —— */
+#authGate{ position:fixed; inset:0; z-index:90; display:none; align-items:center; justify-content:center;
+  background:rgba(245,245,242,.96); backdrop-filter:blur(4px); }
+#authGate.show{ display:flex; }
+#authGate .card{ width:320px; background:var(--surface); border:1px solid var(--line);
+  border-radius:14px; padding:26px 28px; box-shadow:0 16px 48px rgba(20,20,18,.14); }
+#authGate .wordmark-lg, #intro .wordmark-lg{ height:24px; width:auto; display:block; margin:0 0 8px; }
+#authGate .sub{ color:var(--dim); font-size:12.5px; margin:0 0 16px; }
+#authTabs{ display:flex; gap:6px; margin-bottom:14px; }
+#authTabs button{ flex:1; padding:7px 0; border:1px solid var(--line); border-radius:8px;
+  background:var(--surface2); color:var(--dim); font-size:13px; cursor:pointer; }
+#authTabs button.on{ background:var(--surface); color:var(--fg); font-weight:600; border-color:var(--line2); }
+#authGate label{ display:block; font-size:12.5px; color:var(--dim); margin:10px 0 4px; }
+#authGate input{ width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line2);
+  border-radius:8px; background:var(--surface2); color:var(--fg); font-size:14px; }
+#authErr{ color:#b3362d; font-size:12.5px; min-height:18px; margin:10px 0 4px; }
+#authSubmit{ width:100%; padding:9px 0; border:0; border-radius:8px; background:var(--rec);
+  color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+#authSubmit:hover{ background:#a83a32; }
+
+#userChip{ color:var(--dim); font-size:12.5px; margin-left:8px; }
+#homeBtn,#logoutBtn{ font-size:13px; }
+#btnFav{ font-size:13px; }
+
 </style>
+<link rel="stylesheet" href="tools/editor-workflow.css">
 </head>
 <body>
 <header>
-  <h1>LectureLite <small>文件 + 音频 + 操作时间轴</small></h1>
+  <h1 class="brand"><img src="docs/logo.png" alt="LectureLite" class="wordmark"><small>文件 + 音频 + 操作时间轴</small></h1>
   <button id="modeRec" class="primary">录制</button>
   <button id="modePlay">播放</button>
   <button id="helpBtn" title="帮助">?</button>
-  <span id="status"></span>
+  <button id="homeBtn" class="hidden" title="我的主页：我的录制 / 分享给我 / 收藏">主页</button>
+  <span id="userChip" class="hidden"></span>
+  <button id="logoutBtn" class="hidden">退出</button>
+  <span id="recBadge"></span>
+  <span id="status" role="status" aria-live="polite"></span>
+  <button id="toolbarToggle" title="收起工具栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
   <div class="bar on" id="recBar">
     <span class="src-group">
-      <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,image/*" multiple style="display:none">
+      <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,.html,.htm,image/*" multiple style="display:none">
       <input type="file" id="srcDir" webkitdirectory style="display:none">
-      <button id="srcFileBtn" class="src-btn">选择文件</button>
-      <button id="srcDirBtn" class="src-btn">选择文件夹</button>
+      <button id="srcFileBtn" class="src-btn">添加文档</button>
+      <button id="srcDirBtn" class="src-btn">添加文件夹</button>
     </span>
     <label><input type="checkbox" id="embedSrc" checked>打包源文件</label>
+    <label title="取消后只记录翻页、滚动和标注，不使用麦克风"><input id="recordAudio" type="checkbox" checked>录制声音</label>
     <button id="btnStart" class="primary" disabled>开始录制</button>
     <button id="btnStop" disabled>停止</button>
-    <button id="btnExport" disabled>导出</button>
-    <button id="btnShare" disabled>分享</button>
-    <button id="btnAutoScript" disabled title="调用大模型生成讲解稿">自动生成文稿</button>
+    <button id="btnExport" disabled>下载讲解包</button>
+    <button id="btnPreview" disabled>预览讲解</button>
+    <button id="btnWriteScript" disabled>自己写讲稿</button>
+    <button id="btnShare" disabled>保存到主页</button>
+    <button id="btnAutoScript" disabled title="根据当前文档生成讲稿，确认后可合成语音">AI 生成讲稿</button>
     <span id="recTimer" style="color:var(--dim);font-size:12px"></span>
     <span id="shareLinkWrap" class="share-link-wrap hidden">
       <input type="text" id="shareLink" readonly>
@@ -296,9 +401,10 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
   </div>
   <div class="bar" id="playBar">
     <input type="file" id="zipPick" accept=".zip">
-    <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,image/*" multiple class="hidden">
+    <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,.html,.htm,image/*" multiple class="hidden">
     <button id="btnPlay" disabled>播放</button>
-    <button id="btnSharePlay" disabled>分享</button>
+    <button id="btnSharePlay" disabled title="保存一份到自己的主页，随后可在主页管理分享">保存副本到主页</button>
+    <button id="btnFav" class="hidden" disabled title="收藏当前课程，可在主页查看">☆ 收藏</button>
     <button id="ccBtn" title="AI 讲稿字幕开关" hidden disabled>字幕</button>
     <input type="range" id="seek" min="0" max="1000" step="1" value="0" disabled>
     <span id="time">–:––</span>
@@ -312,12 +418,18 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
     </span>
   </div>
 </header>
+<div id="workflowHint" class="workflow-hint" role="status"></div>
 <main>
   <div id="stage">
     <div id="tabbar"><div id="tabs"></div></div>
     <div id="workarea">
-      <aside id="toc"><div id="toc-title">目录</div></aside>
+      <aside id="toc"><div id="toc-head"><div id="toc-title">目录</div><button id="tocCollapse" title="收起/展开目录">«</button></div></aside>
       <div id="viewer"><div id="doc"></div></div>
+      <div id="emptyState" class="hidden">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        <p class="empty-title">从一份文档开始讲解</p>
+        <p class="empty-sub">拖入 MD、PDF、HTML，或添加包含图片的文件夹。<br>已有讲解包？拖入 lecture.zip 即可播放。</p><div class="empty-actions"><button id="emptyImport">添加文档</button><button id="emptyCourse">打开讲解包</button></div>
+      </div>
       <div id="cursor"></div>
       <div id="ccBar" class="hidden">
         <div id="ccHead">
@@ -338,7 +450,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
         <button id="scriptPanel-toggle" title="收起/展开">▼</button>
       </div>
       <div class="script-inner">
-        <div id="scriptPanel-body" class="placeholder">点击「✨ 自动生成文稿」从当前文档生成讲解稿。</div>
+        <div id="scriptPanel-body" class="placeholder">用 AI 生成讲稿，或选择「自己写讲稿」。确认内容后再生成讲解。</div>
         <div id="scriptPanel-edit"><textarea placeholder="在此编辑文稿…"></textarea></div>
         <div id="scriptTtsRow">
           <label title="生成时朗读文稿；不勾选则生成无语音的时间轴包"><input type="checkbox" id="scriptTtsEnabled" checked>语音</label>
@@ -358,20 +470,41 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
           <button id="scriptSave" class="primary">保存</button>
           <button id="scriptCopy">复制</button>
           <button id="scriptRegen">重新生成</button>
-          <button id="scriptRecord" disabled title="在线合成语音，一键直接生成（失败时回退为浏览器实时录制）">录制演讲</button>
+          <button id="scriptRecord" disabled title="在线合成语音，一键直接生成（失败时回退为浏览器实时录制）">生成语音讲解</button>
         </div>
       </div>
     </div>
   </div>
 </main>
 
+<div id="dropZone"><div class="box">松开以加载文件</div></div>
+
+<div id="authGate">
+  <div class="card">
+    <img src="docs/logo.png" alt="LectureLite" class="wordmark-lg">
+    <p class="sub">登录后可保存录制、查看分享与收藏课程</p>
+    <div id="authTabs">
+      <button id="tabLogin" class="on">登录</button>
+      <button id="tabRegister">注册</button>
+    </div>
+    <form id="authForm">
+      <label>UID</label>
+      <input type="text" id="authUid" autocomplete="username" required>
+      <label>密码</label>
+      <input type="password" id="authPwd" autocomplete="current-password" required>
+      <div id="authErr"></div>
+      <button type="submit" id="authSubmit">登录</button>
+    </form>
+  </div>
+</div>
+
 <div id="intro"><div class="card" onclick="event.stopPropagation()">
-  <h2>LectureLite</h2>
+  <img src="docs/logo.png" alt="LectureLite" class="wordmark-lg">
   <p style="color:var(--dim);font-size:13px;margin:0 0 4px">源文件 + 你的声音 + 操作时间轴，不用录屏。</p>
   <ol>
-    <li><b>录制</b>：选择 <code>.md</code> / <code>.pdf</code>，或用<b>选文件夹</b>导入含 <code>images/</code> 的 md 项目；点击 <b>+ 添加文件</b> 可继续加文件。</li>
-    <li><b>播放</b>：选择 <code>lecture.zip</code>，按 <b>播放</b>。页面随音频自动滚动、还原光标与点击，可拖动进度、变速。录制中的多文件切换也会被自动还原。</li>
-    <li>zip 内容 = 源文件 + audio + lecture.json。20 分钟讲解约 15 MB。</li>
+    <li><b>录制</b>：把 <code>.md</code> / <code>.pdf</code> / 文件夹<b>拖进页面</b>，或用上方按钮选择；点工作区 <b>+</b> 可继续加文件。顶部工具栏可<b>收起</b>（悬停顶部临时展开）。</li>
+    <li><b>标注</b>：选中文字浮现工具栏；悬停已标注内容点 <b>×</b> 删除，<kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销；批注点波浪线查看内容，气泡内可删除。</li>
+    <li><b>播放</b>：把 <code>lecture.zip</code> 拖进来，按 <b>播放</b>；<kbd>空格</kbd> 暂停/继续，可拖动进度、变速，多文件切换自动还原。</li>
   </ol>
   <p style="color:var(--dim2);font-size:12px;margin:0 0 16px">建议使用 Chrome；打开本页需联网加载渲染库。</p>
   <button class="primary" id="introOk">知道了</button>
@@ -397,10 +530,41 @@ let annotations = [];   // [{t,type,fi,offsets|coords,text?,icon?}]
 let annotationPopupEvents = []; // [{t,id,fi,open}] 批注气泡显隐时间轴
 let annotationTools = null;
 
-const md = window.markdownit ? markdownit({ html:true, linkify:true, breaks:false }) : null;
+// html:false：不渲染 Markdown 里的原始 HTML（分享包中的 md 是外部输入，防存储型 XSS）
+const md = window.markdownit ? markdownit({ html:false, linkify:true, breaks:false }) : null;
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
-function status(msg){ $('status').textContent = msg || ''; }
+function status(msg, isErr){
+  const el = $('status');
+  el.textContent = msg || '';
+  el.classList.toggle('err', !!isErr);
+}
+// 录制计时同时写进度条内计时器与收起模式下的行内徽标
+function renderRecIndicator(html){
+  $('recTimer').innerHTML = html;
+  $('recBadge').innerHTML = html;
+}
+const headerEl = document.querySelector('header');
+// —— 顶部工具栏收起：收起后 .bar 变为覆盖层，悬停页面顶部临时展开；状态本地记忆 ——
+(function setupToolbarCollapse(){
+  const toggle = $('toolbarToggle');
+  if (!toggle) return;
+  function apply(c){
+    headerEl.classList.toggle('collapsed', c);
+    toggle.title = c ? '展开工具栏（悬停顶部可临时展开）' : '收起工具栏';
+  }
+  toggle.addEventListener('click', () => {
+    const c = !headerEl.classList.contains('collapsed');
+    apply(c);
+    try { localStorage.setItem('llToolbarCollapsed', c ? '1' : '0'); } catch(e){}
+  });
+  try { apply(localStorage.getItem('llToolbarCollapsed') === '1'); } catch(e){}
+})();
+// 页面退出时统一释放工作区创建的 blob URL
+window.addEventListener('pagehide', () => {
+  for (const f of files){ if (f._imgUrls && f._imgUrls.length) f._imgUrls.forEach(u => URL.revokeObjectURL(u)); }
+  if (play && play.audio){ try { URL.revokeObjectURL(play.audio.src); } catch(e){} }
+});
 function fmtTime(s){ s = Math.max(0, s|0); return (s/60|0) + ':' + String(s%60).padStart(2,'0'); }
 function throttle(fn, ms){ let last = 0; return function(a){ const n = performance.now(); if (n - last < ms) return; last = n; fn(a); }; }
 function upperBound(arr, t){ let lo = 0, hi = arr.length; while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m].t <= t) lo = m + 1; else hi = m; } return lo; }
@@ -412,23 +576,34 @@ const tabBar = $('tabbar'), tabsEl = $('tabs');
 
 function updateTabs(){
   if (!tabsEl) return;
+  // 空工作区：隐藏 tab 栏，显示引导空状态
+  tabBar.style.display = files.length ? '' : 'none';
+  const emptyState = $('emptyState');
+  if (emptyState) emptyState.classList.toggle('hidden', files.length > 0);
+  if (!files.length){ tabsEl.innerHTML = ''; return; }
   tabsEl.innerHTML = '';
   for (let i = 0; i < files.length; i++){
     const f = files[i];
     const t = document.createElement('div');
     t.className = 'tab' + (i === currentFileIndex ? ' active' : '');
-    // 短文件名截断
+    // 文件名来自外部（zip / 拖拽），一律 textContent，不走 innerHTML
+    const nameEl = document.createElement('span');
+    nameEl.className = 'tab-name';
     let displayName = f.name;
     if (displayName.length > 35) displayName = '…' + displayName.slice(-32);
-    t.innerHTML = '<span class="tab-name" title="' + f.name + '">' + displayName + '</span>'
-      + '<span class="tab-close" data-idx="' + i + '" title="关闭">×</span>';
-    // 点击标签切换文件
-    t.querySelector('.tab-name').addEventListener('click', () => switchToFile(i));
-    // 点击 × 关闭文件
-    t.querySelector('.tab-close').addEventListener('click', (e) => {
+    nameEl.textContent = displayName;
+    nameEl.title = f.name;
+    nameEl.addEventListener('click', () => switchToFile(i));
+    const closeEl = document.createElement('span');
+    closeEl.className = 'tab-close';
+    closeEl.title = '关闭';
+    closeEl.textContent = '×';
+    closeEl.addEventListener('click', (e) => {
       e.stopPropagation();
       closeTab(i);
     });
+    t.appendChild(nameEl);
+    t.appendChild(closeEl);
     tabsEl.appendChild(t);
   }
 }
@@ -438,13 +613,12 @@ async function switchToFile(fi){
   if (fi < 0 || fi >= files.length) return;
   const isChange = fi !== currentFileIndex;
   if (isChange && annotationTools) annotationTools.closeAllComments(mode === 'rec');
-  // 记录切换时间戳（录制中，且确实切换了）
-  if (recState && isChange){
+  // 记录切换时间戳（仅“正在录制中”时；已结束/未录制的 recState 没有 fileSwitches）
+  if (recState && !recState.finished && recState.st0 && isChange){
     recState.fileSwitches.push({ t: Math.round(performance.now() - recState.st0), fi: fi });
   }
   
   // 切换前：保存旧文件的状态（滚动位置 + 选中）
-  let savedSelOffsets = null;
   if (isChange && currentFileIndex >= 0 && files[currentFileIndex]){
     const old = files[currentFileIndex];
     old.savedState = { scrollRatio: viewer.scrollTop / Math.max(1, viewer.scrollHeight - viewer.clientHeight) };
@@ -452,14 +626,14 @@ async function switchToFile(fi){
     if (old.type === 'md' && selLayer && source && source.text){
       const rects = selLayer.querySelectorAll('.sel-rect');
       if (rects.length > 0){
-        savedSelOffsets = saveSelectionOffsets();
+        old.savedState.selectionOffsets = saveSelectionOffsets();
       }
     }
   }
   
   currentFileIndex = fi;
   const f = files[fi];
-  await renderSource(f.blob, f.name, f.imgFiles || []);
+  await renderSource(f);
   updateTabs();
   
   // 切回后：恢复该文件之前的状态
@@ -467,8 +641,8 @@ async function switchToFile(fi){
     const maxScroll = Math.max(1, viewer.scrollHeight - viewer.clientHeight);
     viewer.scrollTop = f.savedState.scrollRatio * maxScroll;
     // 恢复选中（仅 md）
-    if (f.type === 'md' && savedSelOffsets){
-      restoreSelection(savedSelOffsets);
+    if (f.type === 'md' && f.savedState.selectionOffsets){
+      restoreSelection(f.savedState.selectionOffsets);
     }
   }
   
@@ -477,9 +651,17 @@ async function switchToFile(fi){
 
 // 关闭一个文件
 function closeTab(fi){
+  if ((recState && !recState.finished) || recordingScript || (mode === 'play' && play)) {
+    status('录制或播放期间不能关闭文件，请先停止后再操作', true);
+    return;
+  }
   if (files.length <= 1) return;  // 至少保留一个
-  // 释放 blob URL
-  URL.revokeObjectURL(files[fi].blob && files[fi].blob._url);
+  // 释放该文件渲染时创建的 blob URL
+  const closing = files[fi];
+  if (closing && closing._imgUrls){
+    closing._imgUrls.forEach(u => URL.revokeObjectURL(u));
+    closing._imgUrls = [];
+  }
   files.splice(fi, 1);
   // 标注绑定文件序号：删除当前文件的标注，并同步后续文件序号
   annotations = annotations
@@ -501,18 +683,87 @@ function closeTab(fi){
   renderAnnotations();
 }
 
-// 添加文件（选择文件或文件夹后追加新文件）
-async function addFiles(fileList, imgFiles){
-  const mdFile = fileList.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name))
-              || fileList.find(f => !f.type.startsWith('image/'));
-  if (!mdFile) { status('未找到可加载的文件'); return; }
-  // 先渲染新文件（替换当前视图）
-  await renderSource(mdFile, mdFile.name, imgFiles || []);
-  // 如果已在录制状态，记录切换
-  if (recState){
-    recState.fileSwitches.push({ t: Math.round(performance.now() - recState.st0), fi: currentFileIndex });
-    status('已切换到 ' + files[currentFileIndex].name);
+// ---------- 文件加载：文件选择、文件夹、tab 追加、拖拽统一入口 ----------
+// 逻辑路径：目录选择 / 拖文件夹会带一层根目录名，去掉它（md 里相对图片路径不含根目录）
+function relPathOf(f){
+  const p = f.webkitRelativePath || f.name;
+  const segs = p.split('/');
+  return segs.length > 1 ? segs.slice(1).join('/') : p;
+}
+function sourceType(name){ return /\.pdf$/i.test(name) ? 'pdf' : /\.html?$/i.test(name) ? 'html' : 'md'; }
+function sourceMime(type){ return type === 'pdf' ? 'application/pdf' : type === 'html' ? 'text/html' : 'text/markdown'; }
+function makeEntry(f, imgs){
+  const isPdf = /\.pdf$/i.test(f.name);
+  return { name: f.name, blob: f, mime: sourceMime(sourceType(f.name)), type: sourceType(f.name),
+           imgFiles: imgs || [], rel: relPathOf(f) };
+}
+function splitFileList(list){
+  return {
+    docs: list.filter(f => /\.(md|markdown|txt|pdf|html|htm)$/i.test(f.name)),
+    imgs: list.filter(f => f.type && f.type.startsWith('image/'))
+  };
+}
+// 全新加载前清空录制状态与标注（换一组新源文件）
+async function resetWorkspaceForNewSources(){
+  if(recState?.finished && !confirm('替换文档会清空当前录制结果。确认已经下载或保存到主页了吗？')) return false;
+  if ((recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript) {
+    status('录制或生成进行中，不能替换工作区', true);
+    return false;
   }
+  recState = null;
+  $('btnExport').disabled = true;
+  annotations = [];
+  annotationPopupEvents = [];
+  if (annotationTools) annotationTools.setAnnotations(annotations);
+  return true;
+}
+
+// list: File 数组；opts.reset=true 强制替换工作区（如「选择文件夹」），opts.appendAll=true 全部追加为 tab
+async function ingestFiles(list, opts){
+  opts = opts || {};
+  if (!list.length) return;
+  // 单个 zip：直接切播放模式加载
+  if (list.length === 1 && /\.zip$/i.test(list[0].name)){
+    setMode('play');
+    await loadZip(list[0]);
+    return;
+  }
+  const { docs, imgs } = splitFileList(list);
+  if (!docs.length){ status('未找到可加载的 MD、PDF 或 HTML 文件', true); return; }
+  if (mode === 'play'){ status('播放模式下拖入 lecture.zip 才能打开；加载文档请先切到「录制」'); return; }
+
+  const multi = docs.length > 1 || imgs.length > 0;
+  if (!multi){
+    // 单文档：已有文件时追加为新 tab，否则替换
+    if (files.length > 0 && !opts.reset){
+      files.push(makeEntry(docs[0], imgs));
+      await switchToFile(files.length - 1);
+    } else {
+      if (!await resetWorkspaceForNewSources()) return;
+      files = [makeEntry(docs[0], imgs)];
+      currentFileIndex = 0;
+      await switchToFile(0);
+    }
+    return;
+  }
+  // 多文档 / md+图片：作为一组加载（reset 或追加到现有 tab 之后）
+  const append = !!opts.appendAll && files.length > 0;
+  if (!append && !await resetWorkspaceForNewSources()) return;
+  const entries = docs.map(f => makeEntry(f, imgs));
+  files = append ? files.concat(entries) : entries;
+  // rel 路径冲突（不同子目录同名文件）时退回完整路径，避免导出 ZIP 时互相覆盖
+  {
+    const used = new Set();
+    for (const f of files){
+      let rel = f.rel || f.name;
+      if (used.has(rel) && f.blob && f.blob.webkitRelativePath) rel = f.blob.webkitRelativePath;
+      used.add(rel);
+      f.rel = rel;
+    }
+  }
+  currentFileIndex = append ? files.length - entries.length : 0;
+  await switchToFile(currentFileIndex);
+  status((append ? '已追加 ' : '已加载 ') + entries.length + ' 个文档' + (imgs.length ? '，' + imgs.length + ' 张图片' : ''));
 }
 
 // 从 file input 事件获取文件并处理
@@ -520,60 +771,15 @@ async function handleFileInput(e, appendMode){
   const fileList = Array.from(e.target.files);
   if (!fileList.length) return;
   e.target.value = '';  // 重置以便下次选同一文件
-  const mdFile = fileList.find(f => /\.(md|markdown|txt|pdf)$/i.test(f.name))
-              || fileList.find(f => !f.type.startsWith('image/'));
-  const imgFiles = fileList.filter(f => f.type.startsWith('image/'));
-  if (!mdFile) { status('未找到可加载的文件'); return; }
-
-  if (appendMode){
-    // 追加模式：把文件加到 files 数组末尾，然后切过去
-    const mime = /\.pdf$/i.test(mdFile.name) ? 'application/pdf' : 'text/markdown';
-    files.push({ name: mdFile.name, blob: mdFile, mime, type: /\.pdf$/i.test(mdFile.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] });
-    currentFileIndex = files.length - 1;
-    await switchToFile(currentFileIndex);
-  } else {
-    // 覆盖模式：清空旧文件列表，只保留这个
-    annotations = [];
-    annotationPopupEvents = [];
-    if (annotationTools) annotationTools.setAnnotations(annotations);
-    files = [{ name: mdFile.name, blob: mdFile, mime: /\.pdf$/i.test(mdFile.name) ? 'application/pdf' : 'text/markdown', type: /\.pdf$/i.test(mdFile.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] }];
-    currentFileIndex = 0;
-    if (recState && !recState.finished) stopRec();
-    recState = null;
-    $('btnExport').disabled = true;
-    await switchToFile(0);
-  }
+  await ingestFiles(fileList, appendMode ? { appendAll: true } : {});
 }
 
-// 处理文件夹：提取所有 .md 文件并全部加载
+// 处理文件夹：提取所有 .md 文件并全部加载（替换工作区）
 async function handleDirInput(e){
   const fileList = Array.from(e.target.files);
   if (!fileList.length) return;
   e.target.value = '';
-  const mdFiles = fileList.filter(f => /\.(md|markdown|txt)$/i.test(f.name));
-  const pdfFiles = fileList.filter(f => /\.pdf$/i.test(f.name));
-  const allDocFiles = [...mdFiles, ...pdfFiles];
-  const imgFiles = fileList.filter(f => f.type.startsWith('image/'));
-
-  if (!allDocFiles.length){
-    status('文件夹中未找到 .md/.txt/.pdf 文件');
-    return;
-  }
-
-  if (recState && !recState.finished) stopRec();
-  recState = null;
-  $('btnExport').disabled = true;
-  annotations = [];
-  annotationPopupEvents = [];
-  if (annotationTools) annotationTools.setAnnotations(annotations);
-
-  files = [];
-  for (const f of allDocFiles){
-    files.push({ name: f.name, blob: f, mime: /\.pdf$/i.test(f.name) ? 'application/pdf' : 'text/markdown', type: /\.pdf$/i.test(f.name) ? 'pdf' : 'md', imgFiles: imgFiles || [] });
-  }
-  currentFileIndex = 0;
-  await switchToFile(0);
-  status('已加载 ' + allDocFiles.length + ' 个文档');
+  await ingestFiles(fileList, { reset: true });
 }
 
 // 获取实际内容元素 (.md-content / .pdf-page), 用于跨屏幕坐标归一化
@@ -667,15 +873,29 @@ function snapshotAnnotationPopups(){
 }
 
 /* ---------- source rendering (identical layout in record & play) ---------- */
-async function renderSource(blob, name, imgFiles){
+let htmlPresenter = null;
+let htmlTimeline = [];
+async function renderSource(entry){
+  if (htmlPresenter) { htmlPresenter.destroy(); htmlPresenter = null; }
   doc.innerHTML = '';
-  const type = /\.pdf$/i.test(name) ? 'pdf' : 'md';
+  const blob = entry.blob, name = entry.name, imgFiles = entry.imgFiles || [];
+  const type = sourceType(name);
 
+  // 释放该文件上一次渲染创建的 blob URL，避免每次切换都泄漏
+  if (entry._imgUrls){
+    entry._imgUrls.forEach(u => URL.revokeObjectURL(u));
+    entry._imgUrls = [];
+  }
+
+  entry._imgUrls = [];
+  doc.classList.toggle('html-document', type === 'html');
+  $('toc').classList.toggle('hidden', type === 'html');
   // 建立图片路径→blobURL 映射, 处理 md 中的相对路径图片
   const imgMap = {};
   if (imgFiles && imgFiles.length){
     for (const f of imgFiles){
       const url = URL.createObjectURL(f);
+      entry._imgUrls.push(url);
       // 1. 用完整相对路径 (如 "images/xxx.png") 做 key
       const rel = f.webkitRelativePath || f.name;
       // 取 webkitRelativePath 中从 md 同级开始的相对路径
@@ -694,7 +914,27 @@ async function renderSource(blob, name, imgFiles){
     }
   }
 
-  if (type === 'md'){
+  if (type === 'html'){
+    const html = await blob.text();
+    const previousState = entry._htmlState;
+    source = {name,blob,type,text:'',imgFiles};
+    htmlPresenter = await LectureHTML.mount(doc, html, imgMap, (kind,value) => {
+      if (kind === 'state'){
+        entry._htmlState = value;
+        if(recState && !recState.finished && recState.st0)
+          htmlTimeline.push({t:Math.round(performance.now()-recState.st0),fi:currentFileIndex,state:value});
+      }
+      if((kind === 'pointer' || kind === 'click') && recState && !recState.finished && Number.isFinite(value?.x) && Number.isFinite(value?.y)){
+        const point = {t:Math.round(performance.now()-recState.st0),x:Math.max(0,Math.min(1,value.x)),y:Math.max(0,Math.min(1,value.y))};
+        (kind === 'click' ? recState.clicks : recState.cursor).push(point);
+      }
+    });
+    source.text = htmlPresenter.info.text;
+    source.slides = htmlPresenter.info.slides;
+    contentEl = htmlPresenter.frame;
+    htmlPresenter.send('mode', mode === 'play');
+    if(previousState && mode === 'rec'){ htmlPresenter.send('restore',previousState); htmlPresenter.send('mode',false); }
+  } else if (type === 'md'){
     if (!md){ status('markdown-it 未加载（需联网）'); return; }
     const text = await blob.text();
     // 预处理: 把 ![alt](path/img.png) 的路径提取, 用 imgMap 匹配替换成 blobURL
@@ -770,69 +1010,117 @@ async function renderSource(blob, name, imgFiles){
   status('已加载 ' + name + '（' + (blob.size/1024).toFixed(0) + ' KB' + (imgFiles && imgFiles.length ? '，' + imgFiles.length + ' 张图片' : '') + '）');
 }
 
-/* ---------- TOC (目录) ---------- */
+/* ---------- TOC (目录)：树形折叠 + 滚动跟随高亮 ---------- */
+let tocSpy = [];   // [{el, row}] 按文档顺序，供滚动跟随
+function setActiveTocRow(row){
+  document.querySelectorAll('#toc .active').forEach(el => el.classList.remove('active'));
+  if (row) row.classList.add('active');
+}
+
+// 目录折叠：按钮随 innerHTML 重建，用事件委托；状态持久化
+document.addEventListener('click', e => {
+  if (!e.target.closest('#tocCollapse')) return;
+  const toc = $('toc');
+  const collapsed = toc.classList.toggle('collapsed');
+  try { localStorage.setItem('llTocCollapsed', collapsed ? '1' : '0'); } catch(err){}
+});
+try { if (localStorage.getItem('llTocCollapsed') === '1') $('toc').classList.add('collapsed'); } catch(e){}
+
 function updateToc(){
   const toc = $('toc');
   if (!toc) return;
-  // 清空除标题外的内容
-  const titleEl = toc.querySelector('#toc-title');
-  toc.innerHTML = '';
-  if (titleEl) toc.appendChild(titleEl);
-  else {
-    const t = document.createElement('div');
-    t.id = 'toc-title';
-    t.textContent = '目录';
-    toc.appendChild(t);
-  }
-  
+  toc.innerHTML = '<div id="toc-head"><div id="toc-title">目录</div><button id="tocCollapse" title="收起/展开目录">«</button></div>';
+  tocSpy = [];
   if (!source || !contentEl) return;
-  
+
   if (source.type === 'md'){
-    // md: 提取 h1/h2/h3
-    const headings = contentEl.querySelectorAll('h1, h2, h3');
+    const headings = Array.from(contentEl.querySelectorAll('h1, h2, h3'));
     if (!headings.length){
       const empty = document.createElement('div');
-      empty.style.cssText = 'color:var(--dim2);font-size:12px;padding:8px 6px;';
+      empty.className = 'toc-empty';
       empty.textContent = '无标题';
       toc.appendChild(empty);
       return;
     }
+    headings.forEach((h, idx) => { h.id = 'heading-' + idx; });
+    // 构建层级树：h1 可折叠其下 h2/h3，h2 可折叠其下 h3（默认全展开，不持久化）
+    const root = { level: 0, children: [] };
+    const stack = [root];
     headings.forEach((h, idx) => {
-      // 给每个标题加 id 以便跳转
-      const id = 'heading-' + idx;
-      h.id = id;
-      
-      const item = document.createElement('div');
-      const level = h.tagName.toLowerCase();
-      item.className = 'toc-item ' + level;
-      item.textContent = h.textContent;
-      item.title = h.textContent;
-      item.addEventListener('click', () => {
-        // 高亮当前
-        toc.querySelectorAll('.toc-item').forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
-        // 滚动到对应标题
-        h.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      toc.appendChild(item);
+      const level = Number(h.tagName[1]);
+      const node = { level, el: h, children: [] };
+      while (stack.length > 1 && stack[stack.length - 1].level >= level) stack.pop();
+      stack[stack.length - 1].children.push(node);
+      stack.push(node);
     });
-  } else if (source.type === 'pdf'){
-    // pdf: 列出页面
-    const pages = doc.querySelectorAll('.pdf-page');
-    pages.forEach((page, idx) => {
+    toc.appendChild(buildTocBranches(root));
+  } else {
+    // pdf: 页面列表（无折叠，但支持滚动跟随）
+    doc.querySelectorAll('.pdf-page').forEach((page, idx) => {
       page.id = 'pdf-page-' + idx;
-      const item = document.createElement('div');
-      item.className = 'toc-page';
-      item.textContent = '第 ' + (idx + 1) + ' 页';
-      item.addEventListener('click', () => {
-        toc.querySelectorAll('.toc-page').forEach(el => el.classList.remove('active'));
-        item.classList.add('active');
+      const row = document.createElement('div');
+      row.className = 'toc-row toc-page';
+      const text = document.createElement('span');
+      text.className = 'toc-text';
+      text.textContent = '第 ' + (idx + 1) + ' 页';
+      row.appendChild(text);
+      row.addEventListener('click', () => {
+        setActiveTocRow(row);
         page.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
-      toc.appendChild(item);
+      toc.appendChild(row);
+      tocSpy.push({ el: page, row });
     });
   }
 }
+
+// 递归渲染一层的目录分支
+function buildTocBranches(node){
+  const frag = document.createDocumentFragment();
+  for (const child of node.children){
+    const branch = document.createElement('div');
+    branch.className = 'toc-branch';
+    const row = document.createElement('div');
+    row.className = 'toc-row h' + child.level;
+    const fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'toc-fold' + (child.children.length ? '' : ' ghost');
+    if (child.children.length) fold.title = '折叠 / 展开小节';
+    fold.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+    fold.addEventListener('click', e => {
+      e.stopPropagation();
+      branch.classList.toggle('folded');
+    });
+    const text = document.createElement('span');
+    text.className = 'toc-text';
+    text.textContent = child.el.textContent;
+    text.title = child.el.textContent;
+    row.appendChild(fold);
+    row.appendChild(text);
+    row.addEventListener('click', () => {
+      setActiveTocRow(row);
+      child.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    branch.appendChild(row);
+    if (child.children.length) branch.appendChild(buildTocBranches(child));
+    tocSpy.push({ el: child.el, row });
+    frag.appendChild(branch);
+  }
+  return frag;
+}
+
+// 滚动跟随：视口顶部附近最后一个标题 → 高亮对应目录项
+const tocSpyScroll = throttle(() => {
+  if (!tocSpy.length) return;
+  const probe = viewer.getBoundingClientRect().top + Math.min(140, viewer.clientHeight * 0.25);
+  let cur = tocSpy[0];
+  for (const it of tocSpy){
+    if (it.el.getBoundingClientRect().top <= probe) cur = it;
+    else break;
+  }
+  if (cur && !cur.row.classList.contains('active')) setActiveTocRow(cur.row);
+}, 150);
+viewer.addEventListener('scroll', tocSpyScroll, { passive: true });
 
 /* ---------- recording ---------- */
 function pickAudioMime(){
@@ -878,7 +1166,7 @@ if (tabBar){
     if (!tabAddInput) {
       tabAddInput = document.createElement('input');
       tabAddInput.type = 'file';
-      tabAddInput.accept = '.md,.markdown,.txt,.pdf,image/*';
+      tabAddInput.accept = '.md,.markdown,.txt,.pdf,.html,.htm,image/*';
       tabAddInput.multiple = true;
       tabAddInput.style.display = 'none';
       document.body.appendChild(tabAddInput);
@@ -891,28 +1179,142 @@ if (tabBar){
   });
 }
 
+// 无源文件的 zip：用户手动补齐源文件后，按 zip 里记录的 meta 匹配并进入播放
 $('srcPick2').addEventListener('change', async e => {
   const filesIn = Array.from(e.target.files);
-  if (!filesIn.length || !pendingPlay) return;
+  const pp = pendingPlay;
+  if (!filesIn.length || !pp) return;
   pendingPlay = null;
+  e.target.value = '';
   $('srcPick2').classList.add('hidden');
+
+  const { docs, imgs } = splitFileList(filesIn);
+  const byPath = new Map();
+  const addCandidate = (key, file) => {
+    key = String(key || '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+    if (!key) return;
+    // basename 有歧义时不猜测，要求用户选择带目录结构的源文件。
+    if (byPath.has(key) && byPath.get(key) !== file) byPath.set(key, null);
+    else byPath.set(key, file);
+  };
+  for (const f of docs){
+    addCandidate(f.name, f);
+    addCandidate(relPathOf(f), f);
+    addCandidate(f.webkitRelativePath, f);
+  }
+  const metas = (pp.json.files && pp.json.files.length) ? pp.json.files : [{ name: pp.json.file && pp.json.file.name }];
+  const prepared = [];
+  const missing = [];
+  for (const meta of metas){
+    const metaName = String(meta.name || '').replace(/\\/g, '/').replace(/^\.\//, '');
+    const f = byPath.get(metaName.toLowerCase());
+    if (!f) { missing.push(metaName || '（未命名文件）'); continue; }
+    const type = sourceType(meta.name);
+    const entry = makeEntry(f, type === 'md' ? imgs : []);
+    // 回放元数据使用包内逻辑路径；本地选择时的根目录名不应影响匹配。
+    entry.rel = metaName;
+    entry.name = metaName;
+    prepared.push(entry);
+  }
+  if (missing.length){
+    pendingPlay = pp;
+    $('srcPick2').classList.remove('hidden');
+    status('仍缺少源文件：' + missing.join('、') + '。请选择完整文件夹或补齐这些文件。', true);
+    return;
+  }
+  files = prepared;
+  currentFileIndex = 0;
+  await switchToFile(0);
+  startPlayback({ json: pp.json, audioBlob: pp.audioBlob });
+  $('btnSharePlay').disabled = false;
 });
 
+// —— 拖拽加载：文件 / 文件夹 / zip 直接拖进页面 ——
+(function setupDragDrop(){
+  let dragDepth = 0;
+  const dz = $('dropZone');
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  window.addEventListener('dragenter', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    dz.classList.add('show');
+  });
+  window.addEventListener('dragleave', e => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dz.classList.remove('show');
+  });
+  window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener('drop', async e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dz.classList.remove('show');
+    try {
+      const list = await filesFromDataTransfer(e.dataTransfer);
+      if (list.length) ingestFiles(list);
+    } catch (err){ status('读取拖入文件失败：' + err.message, true); }
+  });
+  // 展开拖入的目录（保留相对路径，供 md 图片匹配）
+  async function filesFromDataTransfer(dt){
+    const items = dt.items ? Array.from(dt.items) : [];
+    const entries = [];
+    for (const it of items){
+      if (it.kind !== 'file') continue;
+      const en = it.webkitGetAsEntry && it.webkitGetAsEntry();
+      if (en) entries.push(en);
+    }
+    if (!entries.length) return Array.from(dt.files || []);
+    const out = [];
+    async function walk(entry, prefix){
+      if (entry.isFile){
+        const f = await new Promise((res, rej) => entry.file(res, rej));
+        try { Object.defineProperty(f, 'webkitRelativePath', { value: prefix + f.name }); } catch (e) {}
+        out.push(f);
+      } else if (entry.isDirectory){
+        const reader = entry.createReader();
+        while (true){
+          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+          if (!batch.length) break;
+          for (const c of batch) await walk(c, prefix + entry.name + '/');
+        }
+      }
+    }
+    for (const en of entries) await walk(en, '');
+    return out;
+  }
+})();
+
 async function startRec(){
-  if (!source || recState) return;
-  if (!window.MediaRecorder || !navigator.mediaDevices){ status('此浏览器不支持 MediaRecorder，请用 Chrome'); return; }
-  if (!md && source.type === 'md'){ status('markdown-it 未加载'); return; }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (err){ status('麦克风不可用：' + err.message); return; }
+  if (!source) return;
+  if (recState && !recState.finished) return;   // 正在录制中
+  const withAudio = $('recordAudio').checked;
+  if (withAudio && (!window.MediaRecorder || !navigator.mediaDevices)){ status('此浏览器不支持录音，可取消「录制声音」只记录操作', true); return; }
+  if (!md && source.type === 'md'){ status('markdown-it 未加载', true); return; }
+  if(recState?.finished && !recState.saved && !confirm('当前讲解尚未保存，重新录制会替换它。继续吗？'))return;
+  let stream = null;
+  try { if(withAudio) stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (err){ status('麦克风不可用：' + err.message, true); return; }
+  // 覆盖上一次已完成的结果：从干净的时间轴和标注重新开始
+  let overwrite = false;
+  if (recState && recState.finished){
+    overwrite = true;
+    recState = null;
+    annotations = [];
+    annotationPopupEvents = [];
+    if (annotationTools) annotationTools.setAnnotations(annotations);
+  }
   const mime = pickAudioMime();
-  const rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined);
+  const rec = withAudio ? new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined) : null;
   const chunks = [];
-  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  if(rec) rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   const states = [], cursor = [], clicks = [], fileSwitches = [];
+  // 记录初始文件：播放端靠它知道“第一次切换之前”在哪个文件
+  if (currentFileIndex >= 0) fileSwitches.push({ t: 0, fi: currentFileIndex });
   let lastKey = '', selKey = '';
   const st0 = performance.now();
-  rec.start(1000);
+  rec?.start(1000);
 
   const onMove = throttle(e => {
     const cr = getContentRect();
@@ -946,6 +1348,7 @@ async function startRec(){
     lastKey = key;
     states.push({ t: Math.round(performance.now() - st0), sr: Math.round(scrollRatio * 10000) / 10000, y: Math.round(viewer.scrollTop), s: s ? { a: s[0], b: s[1] } : null });
   }
+  htmlTimeline = files.flatMap((f,fi) => f._htmlState ? [{t:0,fi,state:f._htmlState}] : []);
   const onScroll = throttle(pushState, 80);
   pushState();
   viewer.addEventListener('scroll', onScroll);
@@ -961,36 +1364,44 @@ async function startRec(){
   $('btnExport').disabled = true;
   $('btnShare').disabled = true;
   timerIv = setInterval(() => {
-    $('recTimer').innerHTML = '<span class="rec-dot"></span>' + fmtTime((performance.now() - recState.st0) / 1000);
+    renderRecIndicator('<span class="rec-dot"></span>' + fmtTime((performance.now() - recState.st0) / 1000));
   }, 250);
-  status('录制中… 边讲边滚动 / 选中文字 / 点击即可');
+  headerEl.classList.add('recording');
+  status((overwrite ? '新录制（将替换上次结果）… ' : '') + '边讲边滚动 / 选中文字 / 点击即可');
 }
 $('btnStart').addEventListener('click', startRec);
 
-function stopRec(){
+async function stopRec(){
   // 录制演讲进行中：中止它
   if (recordingScript){ scriptRecAbort = true; return; }
   if (!recState || recState.finished) return;
   const { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown } = recState;
+  $('btnStop').disabled = true;
+  if(htmlPresenter){const state=await htmlPresenter.capture();if(state)htmlTimeline.push({t:Math.round(performance.now()-st0),fi:currentFileIndex,state});}
   clearInterval(iv);
   clearInterval(timerIv);
   viewer.removeEventListener('scroll', onScroll);
   viewer.removeEventListener('pointermove', onMove);
   viewer.removeEventListener('pointerdown', onDown);
   document.removeEventListener('selectionchange', onScroll);
-  stream.getTracks().forEach(t => t.stop());
+  stream?.getTracks().forEach(t => t.stop());
 
-  // 同步组装导出数据 —— 不依赖 onstop 异步回调,确保停止后立即可导出
-  const audioBlob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+  // 先停录音器并等最后一块数据吐出（stop 会触发最后一次 dataavailable），
+  // 再组装 Blob —— 否则手动停止会丢掉最后不到一个 timeslice 的音频
+  await new Promise(resolve => {
+    try { rec.onstop = resolve; rec.stop(); } catch(e){ resolve(); }
+  });
+
+  const audioBlob = rec ? new Blob(chunks, { type: rec.mimeType || 'audio/webm' }) : null;
   const json = {
     v: 3, app: 'LectureLite', created: new Date().toISOString(),
     duration: (performance.now() - st0) / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
     // 兼容旧格式：若有多个文件用 files，否则保留 file
-    file: { name: (files[currentFileIndex] || {}).name || source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
-    files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+    file: { name: (files[currentFileIndex] || {}).name || source.name, mime: sourceMime(source.type) },
+    files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
     fileSwitches,
-    states, cursor, clicks,
+    states, cursor, clicks, htmlStates:htmlTimeline,
     annotations: snapshotAnnotations(),
     annotationPopups: snapshotAnnotationPopups()
   };
@@ -1001,39 +1412,32 @@ function stopRec(){
   $('srcPick').disabled = false;
   $('btnExport').disabled = false;
   $('btnShare').disabled = false;
-  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
-  status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + annotations.length + ' 个标注，' + files.length + ' 个文件，' + fileSwitches.length + ' 次切换 → 可导出');
+  headerEl.classList.remove('recording');
+  renderRecIndicator('<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration));
+  status('录制完成：' + fmtTime(json.duration) + (audioBlob ? '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB' : '，仅操作（无音频）') + '，' + files.length + ' 个文件 → 可预览、下载或保存');
 
-  // onstop 异步回调只负责用更精确的时长刷新一次(可选),失败也不影响导出
-  rec.onstop = async () => {
-    try {
-      const dur = await audioDuration(audioBlob);
-      if (dur && isFinite(dur)){
-        json.duration = Math.max(dur, json.duration);
-        $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
-        status('录制完成：' + fmtTime(json.duration) + '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
-      }
-    } catch(e) {}
-  };
-  try { rec.stop(); } catch(e){}
-
-  // 若 3 秒内 onstop 仍未修正时长,用计时器兜底
-  setTimeout(() => { if (recState && recState.json){ audioDuration(audioBlob).then(d => { if (d && isFinite(d) && d > recState.json.duration){ recState.json.duration = d; } }); } }, 3500);
+  // 用真实音频时长修正时间轴长度（比墙钟更准），失败不影响导出
+  if(audioBlob) audioDuration(audioBlob).then(d => {
+    if (recState && recState.json && d && isFinite(d) && d > recState.json.duration){
+      recState.json.duration = d;
+      renderRecIndicator('<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(d));
+    }
+  }).catch(() => {});
 }
-$('btnStop').addEventListener('click', stopRec);
+$('btnStop').addEventListener('click', () => { stopRec().catch(err => status('停止录制失败：' + err.message, true)); });
 
 async function exportZip(){
   if (!recState || !recState.finished) return;
   const { audioBlob, json } = recState;
   const zip = new JSZip();
+  // 打包所有文件（含图片），用逻辑路径保留文件夹结构；同名文件已在加载时消歧
+  const zipWritten = new Set();
+  const zipAdd = (path, data) => { if (path && !zipWritten.has(path)){ zip.file(path, data); zipWritten.add(path); } };
   if ($('embedSrc').checked){
-    // 打包所有文件（含图片）
     for (const f of files){
-      zip.file(f.name, f.blob);
+      zipAdd(f.rel || f.name, f.blob);
       if (f.imgFiles){
-        for (const img of f.imgFiles){
-          zip.file(img.name, img);
-        }
+        for (const img of f.imgFiles) zipAdd(relPathOf(img) || img.name, img);
       }
     }
   }
@@ -1051,6 +1455,7 @@ async function exportZip(){
   a.download = baseName(files[0].name) + '.lecture.zip';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  recState.saved = true;
   status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB，' + files.length + ' 个文件' + audioNote + '）— 把这一个文件发给听众即可');
 }
 $('btnExport').addEventListener('click', exportZip);
@@ -1061,12 +1466,17 @@ async function doShare(zipBlob, fileName, linkInputId, wrapId){
   try {
     const fd = new FormData();
     fd.append('file', new File([zipBlob], fileName, { type: 'application/zip' }));
-    const res = await fetch('/share', { method: 'POST', body: fd });
-    if (!res.ok) throw new Error('服务器返回 ' + res.status);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || ('服务器返回 ' + res.status));
+    }
     const data = await res.json();
-    $(linkInputId).value = data.url;
-    $(wrapId).classList.remove('hidden');
-    status('分享链接已生成');
+    if (recState?.finished) recState.saved = true;
+    if (data.rec_id) setCurrentRec(data.rec_id, false);   // 上传成功后可在播放栏收藏
+    $(linkInputId).value = '';
+    $(wrapId).classList.add('hidden'); // A private file URL is not a public share link.
+    status('已保存到「我的录制」。在主页的「分享与管理」中发送给别人。');
     return data.url;
   } catch (err){
     $(linkInputId).value = '';
@@ -1080,15 +1490,17 @@ $('btnShare').addEventListener('click', async () => {
   const { audioBlob, json } = recState;
   status('正在打包并上传…');
   const zip = new JSZip();
+  const zipWritten = new Set();
+  const zipAdd = (path, data) => { if (path && !zipWritten.has(path)){ zip.file(path, data); zipWritten.add(path); } };
   if ($('embedSrc').checked){
     for (const f of files){
-      zip.file(f.name, f.blob);
-      if (f.imgFiles){ for (const img of f.imgFiles) zip.file(img.name, img); }
+      zipAdd(f.rel || f.name, f.blob);
+      if (f.imgFiles){ for (const img of f.imgFiles) zipAdd(relPathOf(img) || img.name, img); }
     }
   }
-  const ty = audioBlob.type || 'audio/webm';
+  const ty = audioBlob?.type || 'audio/webm';
   const ext = ty.includes('mp4') ? 'm4a' : ty.includes('ogg') ? 'ogg' : ty.includes('wav') ? 'wav' : ty.includes('mpeg') ? 'mp3' : 'webm';
-  zip.file('audio.' + ext, audioBlob);
+  if (audioBlob) zip.file('audio.' + ext, audioBlob);
   zip.file('lecture.json', JSON.stringify(json));
   const zipBlob = await zip.generateAsync({ type: 'blob' });
   doShare(zipBlob, baseName(files[0].name) + '.lecture.zip', 'shareLink', 'shareLinkWrap');
@@ -1104,34 +1516,74 @@ $('copyLink2').addEventListener('click', () => {
 });
 
 /* ---------- playback ---------- */
+const MAX_ZIP_BYTES = 150 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 2000;
+const MAX_ZIP_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
+function safeZipPath(name){
+  if (typeof name !== 'string' || !name || name.length > 512) return false;
+  return !name.startsWith('/') && !name.includes('\\')
+    && name.split('/').every(part => part && part !== '.' && part !== '..');
+}
+function imageMime(name){
+  const n = String(name).toLowerCase();
+  if (/\.svg$/.test(n)) return 'image/svg+xml';
+  if (/\.jpe?g$/.test(n)) return 'image/jpeg';
+  if (/\.gif$/.test(n)) return 'image/gif';
+  if (/\.webp$/.test(n)) return 'image/webp';
+  if (/\.avif$/.test(n)) return 'image/avif';
+  if (/\.bmp$/.test(n)) return 'image/bmp';
+  return 'image/png';
+}
 async function loadZip(file){
+  if ((recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript){status('请先停止录制再打开课程',true);return;}
   lastLoadedZipBlob = file;
   lastLoadedZipName = file.name;
   try {
+    if (!file || file.size > MAX_ZIP_BYTES) throw new Error('ZIP 文件过大（上限 150MB）');
     const zip = await JSZip.loadAsync(file);
-    let json = null, audioEntry = null;
+    const entries = Object.values(zip.files).filter(e => !e.dir);
+    if (entries.length > MAX_ZIP_ENTRIES) throw new Error('ZIP 条目过多（上限 ' + MAX_ZIP_ENTRIES + '）');
+    let uncompressed = 0;
+    for (const e of entries){
+      const size = Number(e && e._data && e._data.uncompressedSize);
+      if (Number.isFinite(size) && size >= 0) uncompressed += size;
+      if (uncompressed > MAX_ZIP_UNCOMPRESSED_BYTES) throw new Error('ZIP 解压后内容过大（上限 500MB）');
+    }
+    const jsonEntry = zip.file('lecture.json');
+    if (!jsonEntry) throw new Error('zip 里找不到 lecture.json 时间轴');
+    let json;
+    try { json = JSON.parse(await jsonEntry.async('string')); }
+    catch(e){ throw new Error('lecture.json 不是合法 JSON'); }
+    if (!json || typeof json !== 'object') throw new Error('lecture.json 格式错误');
+    const rawMetas = Array.isArray(json.files) && json.files.length
+      ? json.files : (json.file ? [json.file] : []);
+    if (!rawMetas.length || !rawMetas.every(meta => meta && safeZipPath(meta.name))) {
+      throw new Error('lecture.json 缺少合法的源文件列表');
+    }
+    const audioEntries = entries.filter(e => /^audio\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(e.name));
+    if (audioEntries.length > 1) throw new Error('ZIP 包含多个 audio 文件');
+    const audioEntry = audioEntries[0] || null;
     const imgEntries = {};
-    for (const name in zip.files){
-      const e = zip.files[name];
-      if (e.dir) continue;
-      if (/\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(name)) audioEntry = e;
-      else if (name.endsWith('.json')) json = JSON.parse(await e.async('string'));
-      else if (/\.(png|jpe?g|gif|svg|bmp|webp|avif)$/i.test(name)){
-        if (!imgEntries[name]) imgEntries[name] = [];
-        imgEntries[name].push(e);
+    for (const e of entries){
+      if (!safeZipPath(e.name)) throw new Error('ZIP 含非法路径');
+      if (/\.(png|jpe?g|gif|svg|bmp|webp|avif)$/i.test(e.name)){
+        if (!imgEntries[e.name]) imgEntries[e.name] = [];
+        imgEntries[e.name].push(e);
       }
     }
-    if (!json) throw new Error('zip 里找不到 .json 时间轴');
     const audioBlob = audioEntry ? await audioEntry.async('blob') : null;
     annotations = Array.isArray(json.annotations) ? json.annotations : [];
     annotationPopupEvents = Array.isArray(json.annotationPopups) ? json.annotationPopups : [];
     if (annotationTools) annotationTools.setAnnotations(annotations);
 
     // 兼容旧格式：无 files 字段时用 file
-    const fileMetaList = json.files && json.files.length ? json.files : [{ name: json.file && json.file.name, mime: json.file && json.file.mime }];
-    const name = (fileMetaList[0] && fileMetaList[0].name) || 'source';
+    const fileMetaList = rawMetas;
 
-    if (play && play.audio){ play.active = false; play.audio.pause(); }
+    if (play && play.audio){
+      play.active = false; play.audio.pause();
+      URL.revokeObjectURL(play.audio.src);   // 释放上一个包的音频 URL
+      play.audio = null;
+    }
     play = null;
     $('btnPlay').disabled = true; $('btnPlay').textContent = '▶ 播放';
     $('seek').disabled = true; $('rate').disabled = true; $('seek').value = 0;
@@ -1140,26 +1592,31 @@ async function loadZip(file){
     $('srcPick2').classList.add('hidden');
 
     // 从 zip 中收集所有源文件（排除 json/audio）
-    const fileBlobs = {};  // name -> {blob}
-    for (const zipName in zip.files){
-      const e = zip.files[zipName];
-      if (e.dir || zipName.endsWith('.json') || /\.(webm|m4a|mp3|ogg|wav|aac)$/i.test(zipName)) continue;
-      fileBlobs[zipName] = await e.async('blob');
-    }
-
     // 按 json.files 顺序构建播放文件列表
+    const imgFileCache = {};   // zip 内图片只解包一次
+    const imgFileOf = async ie => {
+      if (!imgFileCache[ie.name]){
+        const fImg = new File([await ie.async('blob')], ie.name, { type: imageMime(ie.name) });
+        // 带上 zip 内路径，渲染端按相对路径匹配 md 里的图片引用
+        try { Object.defineProperty(fImg, 'webkitRelativePath', { value: ie.name }); } catch(e){}
+        imgFileCache[ie.name] = fImg;
+      }
+      return imgFileCache[ie.name];
+    };
     const preparedFiles = [];
     for (const meta of fileMetaList){
-      const entry = fileBlobs[meta.name];
+      const zipEntry = zip.file(meta.name);
+      const entry = zipEntry ? await zipEntry.async('blob') : null;
       if (!entry) continue;
-      // 收集该文件对应的图片（同一目录）
+      // 图片绑定：优先与文档同目录的；旧包（文档都在根目录）自然退回全部图片
+      const docDir = String(meta.name).includes('/')
+        ? String(meta.name).slice(0, String(meta.name).lastIndexOf('/') + 1) : '';
       const imgForFile = [];
       for (const imgName in imgEntries){
-        for (const ie of imgEntries[imgName]){
-          imgForFile.push(new File([await ie.async('blob')], ie.name, { type: 'image/png' }));
-        }
+        if (docDir && !imgName.startsWith(docDir)) continue;
+        for (const ie of imgEntries[imgName]) imgForFile.push(await imgFileOf(ie));
       }
-      const type = /\.pdf$/i.test(meta.name) ? 'pdf' : 'md';
+      const type = sourceType(meta.name);
       preparedFiles.push({ name: meta.name, mime: meta.mime, blob: entry, imgFiles: imgForFile, type });
     }
 
@@ -1188,8 +1645,12 @@ $('btnSharePlay').addEventListener('click', () => {
   doShare(lastLoadedZipBlob, lastLoadedZipName, 'shareLink2', 'shareLinkWrap2');
 });
 function startPlayback({ json, audioBlob }){
+  if(play?.audio){play.audio.pause();URL.revokeObjectURL(play.audio.src);}
   const dur = json.duration || 0;
   const hasAudio = !!audioBlob;
+  // 「继续播放」：外部（?pos= 参数）指定的起始位置，取用后立即清掉
+  const seek0 = window.__pendingSeekMs || 0;
+  window.__pendingSeekMs = 0;
   let audio = null;
   if (hasAudio){
     audio = new Audio();
@@ -1199,6 +1660,7 @@ function startPlayback({ json, audioBlob }){
   play = {
     audio,
     hasAudio,
+    htmlStates: (Array.isArray(json.htmlStates) ? json.htmlStates : []).filter(s => s && Number.isFinite(s.t) && Number.isInteger(s.fi) && s.state && typeof s.state === 'object').slice(0,100000).sort((a,b)=>a.t-b.t),
     states: json.states || [],
     cursor: json.cursor || [],
     clicks: json.clicks || [],
@@ -1207,28 +1669,33 @@ function startPlayback({ json, audioBlob }){
     annotationPopups: json.annotationPopups || [],
     clickIdx: 0, lastKey: '',
     meta: json.viewport || { w: viewer.clientWidth, h: viewer.clientHeight },
-    dur, active: false,
+    dur, active: false, _rate: parseFloat($('rate').value) || 1,
     // 无音频时用计时器模拟 currentTime
-    _timerStart: 0, _timerBase: 0
+    _timerStart: 0, _timerBase: seek0 > 0 ? Math.min(seek0, Math.max(0, dur * 1000)) / 1000 : 0
   };
   if (hasAudio){
     audio.addEventListener('loadedmetadata', () => {
       const d = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : dur;
+      if (seek0 > 0 && seek0 < (d - 0.5) * 1000){
+        try { audio.currentTime = seek0 / 1000; } catch(e){}
+      }
       $('seek').max = Math.max(1, Math.round(d * 100));
       $('seek').disabled = false; $('rate').disabled = false;
-      $('time').textContent = '0:00 / ' + fmtTime(d);
+      $('time').textContent = fmtTime(seek0 > 0 ? seek0 / 1000 : 0) + ' / ' + fmtTime(d);
     });
     audio.addEventListener('ended', () => { play.active = false; $('btnPlay').textContent = '▶ 重播'; });
   } else {
     $('seek').max = Math.max(1, Math.round(dur * 100));
     $('seek').disabled = false; $('rate').disabled = false;
-    $('time').textContent = '0:00 / ' + fmtTime(dur);
+    $('time').textContent = fmtTime(seek0 > 0 ? seek0 / 1000 : 0) + ' / ' + fmtTime(dur);
   }
   $('btnPlay').disabled = false;
   renderAnnotations(0);
   const initDur = (hasAudio && isFinite(audio.duration) && audio.duration > 0) ? audio.duration : dur;
   status('已加载：' + fmtTime(initDur) + '，' + play.states.length + ' 条状态 / ' + play.annotations.length + ' 个标注，' + files.length + ' 个文件' + (hasAudio ? '' : '（无音频）') + ' → 按 ▶ 播放');
   setupSubtitle(json);
+  void applyState(seek0).catch(err=>status('初始位置恢复失败：'+err.message,true));
+  updateSubtitle(seek0);
 }
 
 /* ---------- 字幕（AI 讲稿逐句显示，仅 AI 生成包有 script 字段） ---------- */
@@ -1316,7 +1783,7 @@ function getPlayTimeMs(){
   if (play.hasAudio) return play.audio.currentTime * 1000;
   if (!play.active) return play._timerBase * 1000;
   // 无音频：用计时器
-  const elapsed = (performance.now() - play._timerStart) / 1000 * parseFloat($('rate').value);
+  const elapsed = (performance.now() - play._timerStart) / 1000 * play._rate;
   return Math.min((play._timerBase + elapsed) * 1000, play.dur * 1000);
 }
 $('btnPlay').addEventListener('click', () => {
@@ -1338,7 +1805,7 @@ $('btnPlay').addEventListener('click', () => {
     }
   }
 });
-$('seek').addEventListener('input', e => {
+$('seek').addEventListener('input', async e => {
   if (!play) return;
   const t = e.target.value / 100;
   if (play.hasAudio){
@@ -1347,18 +1814,30 @@ $('seek').addEventListener('input', e => {
     play._timerBase = t; play._timerStart = performance.now();
   }
   const tMs = t * 1000;
+  $('time').textContent = fmtTime(t) + ' / ' + fmtTime(play.dur);
   play.clickIdx = 0;
   for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= tMs) play.clickIdx++; }
   play.lastKey = '';
   updateSubtitle(tMs);
-  // 重新定位到播放位置对应的文件
+  // 重新定位到播放位置对应的文件（等渲染完成再套时间轴状态）
   const fi = getFileIndexAt(tMs);
-  if (fi !== currentFileIndex){
-    setActiveFile(fi);
+  try {
+    if (fi !== currentFileIndex) await setActiveFile(fi);
+    await applyState(tMs);
+  } catch (err) {
+    if (play) play.lastKey = '';
+    status('定位播放位置失败：' + err.message, true);
   }
   renderAnnotations(tMs);
 });
-$('rate').addEventListener('change', e => { if (play) play.audio.playbackRate = parseFloat(e.target.value); });
+// 变速：有音频改 playbackRate；无音频的包靠模拟计时器读倍速（play.audio 为 null，不能碰）
+$('rate').addEventListener('change', e => {
+  if (!play) return;
+  const r = parseFloat(e.target.value);
+  if (play.hasAudio) play.audio.playbackRate = r;
+  else {play._timerBase = getPlayTimeMs()/1000;play._timerStart = performance.now();}
+  play._rate = r;
+});
 
 // 查找时间点对应的文件索引
 function getFileIndexAt(t){
@@ -1375,47 +1854,69 @@ async function setActiveFile(fi){
   if (fi < 0 || fi >= files.length) return;
   if (fi !== currentFileIndex && annotationTools) annotationTools.closeAllComments(false);
   // 播放时切换文件：保存旧文件状态（可选，因为播放时 applyState 会恢复 scrollTop）
-  let savedSelOffsets = null;
   if (currentFileIndex >= 0 && files[currentFileIndex]){
     const old = files[currentFileIndex];
     old.savedState = { scrollRatio: viewer.scrollTop / Math.max(1, viewer.scrollHeight - viewer.clientHeight) };
     if (old.type === 'md' && selLayer && source && source.text){
       const rects = selLayer.querySelectorAll('.sel-rect');
       if (rects.length > 0){
-        savedSelOffsets = saveSelectionOffsets();
+        old.savedState.selectionOffsets = saveSelectionOffsets();
       }
     }
   }
   
   currentFileIndex = fi;
   const f = files[fi];
-  await renderSource(f.blob, f.name, f.imgFiles || []);
+  await renderSource(f);
   updateTabs();
   
   // 恢复该文件之前状态
   if (f.savedState){
     const maxScroll = Math.max(1, viewer.scrollHeight - viewer.clientHeight);
     viewer.scrollTop = f.savedState.scrollRatio * maxScroll;
-    if (f.type === 'md' && savedSelOffsets){
-      restoreSelection(savedSelOffsets);
+    if (f.type === 'md' && f.savedState.selectionOffsets){
+      restoreSelection(f.savedState.selectionOffsets);
     }
   }
 }
 
-function applyState(t){
-  const st = play.states;
+async function applyState(t){
+  const P = play;
+  if (!P || P._switching) return;   // 上一次文件切换还没渲染完，本帧跳过
+  const expectedHtmlFi = getFileIndexAt(t);
+  if (expectedHtmlFi !== currentFileIndex) {
+    P._switching = true;
+    try { await setActiveFile(expectedHtmlFi); P.lastKey = ''; P._htmlKey = ''; }
+    finally { P._switching = false; }
+    if(P !== play) return;
+  }
+  if (htmlPresenter) {
+    const rows = P.htmlStates.filter(s => s.fi === currentFileIndex);
+    const hi = upperBound(rows,t)-1, row = rows[hi];
+    const key = currentFileIndex + ':' + hi;
+    if(row && P._htmlKey !== key){ htmlPresenter.send('restore',row.state); P._htmlKey = key; }
+  }
+  const st = P.states;
   if (!st.length) return;
   let i = upperBound(st, t) - 1;
   if (i < 0) i = 0;
   const s = st[i];
   const key = (s.sr !== undefined ? Math.round(s.sr * 1000) : s.y) + '|' + (s.s ? s.s.a + ',' + s.s.b : '');
-  if (key === play.lastKey) return;
-  play.lastKey = key;
-  // 检查是否需要切换文件
+  if (key === P.lastKey) return;
+  // 检查是否需要切换文件（异步渲染，等它完成再套滚动/选区，否则套在旧文件上）
   const expectedFi = getFileIndexAt(t);
   if (expectedFi !== currentFileIndex){
-    setActiveFile(expectedFi);
+    P._switching = true;
+    try {
+      await setActiveFile(expectedFi);
+    } catch (err) {
+      P.lastKey = '';
+      throw err;
+    } finally { P._switching = false; }
+    if (P !== play) return;   // 期间又加载了别的包
   }
+  // 只有文件已切到位后才缓存 key；失败时下一帧仍能重试。
+  P.lastKey = key;
   // 优先使用比例 sr, 兼容旧数据的绝对像素 y
   if (s.sr !== undefined){
     const maxScroll = viewer.scrollHeight - viewer.clientHeight;
@@ -1561,7 +2062,11 @@ function tick(){
       play._timerBase = play.dur;
       play.active = false; $('btnPlay').textContent = '▶ 重播';
     }
-    applyState(t); applyCursor(t); runClicks(t); renderAnnotations(t);
+    void applyState(t).catch(err => {
+      if (play) play.lastKey = '';
+      status('播放状态恢复失败：' + err.message, true);
+    });
+    applyCursor(t); runClicks(t); renderAnnotations(t);
     updateSubtitle(t);   // CC 字幕（暂停拖动进度时也随 getPlayTimeMs 刷新）
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
@@ -1591,7 +2096,13 @@ document.addEventListener('keydown', e => {
 
 /* ---------- mode ---------- */
 function setMode(m){
+  if(m !== mode && ((recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript)){
+    status('请先停止录制或等待生成完成，再切换模式',true); return;
+  }
+  if(m !== mode && play){ play.active = false; play.audio?.pause(); $('btnPlay').textContent = '▶ 播放'; }
   mode = m;
+  document.body.dataset.mode = m;
+  htmlPresenter?.send('mode',m === 'play');
   if (annotationTools) annotationTools.hide();
   $('recBar').classList.toggle('on', m === 'rec');
   $('playBar').classList.toggle('on', m === 'play');
@@ -1614,7 +2125,7 @@ let scriptRecAbort = false;
 // 从当前加载的文档提取可用于生成文稿的文本
 function getDocText(){
   if (!source) return '';
-  if (source.type === 'md' && source.text) return source.text;
+  if (source.text) return source.text;
   // PDF 没有 text 字段，尝试从内容提取
   if (contentEl) return contentEl.textContent || '';
   return '';
@@ -1743,17 +2254,42 @@ function renderScriptTimeline(lines, streaming){
   scriptBody.classList.remove('placeholder');
   scriptBody.innerHTML = '';
   let t = 0;
-  const OP_BADGE = { highlight: '🖍', underline: '〰', strike: '🚫', comment: '💬' };
+  const OP_LABEL = { highlight: '高亮', underline: '下划线', strike: '删除线', comment: '批注' };
   for (const line of lines){
     const dur = estimateLineDurMs(line);
     const div = document.createElement('div');
     div.className = 'script-line';
-    const badges = [];
-    if (line.op && OP_BADGE[line.op.kind]) badges.push('<span class="script-op" title="自动' + line.op.kind + '">' + OP_BADGE[line.op.kind] + '</span>');
-    if (line.key) badges.push('<span class="script-op" title="重难点">🔥</span>');
-    if (line.pause) badges.push('<span class="script-op" title="思考停顿 ' + (line.pause / 1000).toFixed(1) + ' 秒">⏸</span>');
-    div.innerHTML = '<span class="script-t">' + fmtTime(t / 1000) + '</span><span class="script-s"></span>' + badges.join('');
-    div.querySelector('.script-s').textContent = line.text;
+    const tt = document.createElement('span');
+    tt.className = 'script-t';
+    tt.textContent = fmtTime(t / 1000);
+    const main = document.createElement('div');
+    main.className = 'script-main';
+    const row = document.createElement('div');
+    row.className = 'script-row';
+    const s = document.createElement('span');
+    s.className = 'script-s';
+    s.textContent = line.text;
+    row.appendChild(s);
+    const badge = (label, cls, title) => {
+      const b = document.createElement('span');
+      b.className = 'script-badge' + (cls ? ' ' + cls : '');
+      b.textContent = label;
+      if (title) b.title = title;
+      row.appendChild(b);
+    };
+    if (line.op && OP_LABEL[line.op.kind]) badge(OP_LABEL[line.op.kind], '', '讲到这句时自动' + OP_LABEL[line.op.kind]);
+    if (line.key) badge('重点', 'key', '重难点：讲稿里带口语提示');
+    if (line.pause) badge('停顿 ' + (line.pause / 1000).toFixed(1) + 's', '', '句尾思考停顿');
+    main.appendChild(row);
+    // 批注内容直接铺在句下：生成 / 录制时不用悬停就能看到要写什么
+    if (line.op && line.op.kind === 'comment' && line.op.text){
+      const note = document.createElement('div');
+      note.className = 'script-note';
+      note.textContent = line.op.text;
+      main.appendChild(note);
+    }
+    div.appendChild(tt);
+    div.appendChild(main);
     scriptBody.appendChild(div);
     t += dur;
   }
@@ -1762,6 +2298,7 @@ function renderScriptTimeline(lines, streaming){
 
 // 流式生成带时间轴的文稿（NDJSON over SSE）
 async function autoGenerateScriptStream(){
+  if(generatingScript || generatingSpeech || recordingScript) return;
   if (!source || !files.length){ status('请先加载文档'); return; }
   const text = getDocText().trim();
   if (!text){ status('未能提取文档文字', true); return; }
@@ -1779,6 +2316,7 @@ async function autoGenerateScriptStream(){
   scriptBody.innerHTML = '<span style="color:var(--dim2)">正在生成讲解稿，请稍候…</span>';
 
   let rawAccum = '';
+  generatingScript = true;
   try {
     const resp = await fetch('/generate-script-timeline', {
       method: 'POST',
@@ -1834,11 +2372,12 @@ async function autoGenerateScriptStream(){
     }
   } catch (e){
     scriptBody.classList.add('placeholder');
-    scriptBody.innerHTML = '生成失败: ' + e.message;
+    scriptBody.textContent = '生成失败: ' + e.message;
     status('生成失败: ' + e.message, true);
   } finally {
     btn.disabled = false;
     btn.textContent = oldLabel;
+    generatingScript = false;
   }
 }
 // 按钮事件
@@ -1873,9 +2412,12 @@ $('scriptSave').addEventListener('click', () => {
   lastGeneratedScript = scriptTextarea.value;
   scriptBody.classList.remove('placeholder');
   scriptBody.textContent = lastGeneratedScript || '(空文稿)';
-  status('文稿已保存（已编辑文本，时间轴锚点可能失效，录制演讲已禁用）');
-  // 编辑后的纯文本无 anchor，禁用录制
-  $('scriptRecord').disabled = true;
+  const previous = scriptTimeline.slice();
+  const lines = lastGeneratedScript.split(/\n+/).map(t=>t.trim()).filter(Boolean).map((text,i)=>({text,anchor:previous[i]?.anchor || '',pause:previous[i]?.pause || 0}));
+  buildTimeline(lines);
+  renderScriptTimeline(lines,false);
+  $('scriptRecord').disabled = !lines.length;
+  status('文稿已保存，可以继续生成讲解。按原段落顺序修改可保留定位；增删段落后请先预览。');
 });
 
 // 复制
@@ -2004,10 +2546,12 @@ async function recordSpeech(){
   $('btnStop').disabled = false;
   $('srcPick').disabled = true;
   timerIv = setInterval(() => {
-    $('recTimer').innerHTML = '<span class="rec-dot"></span>' + fmtTime((performance.now() - st0) / 1000);
+    renderRecIndicator('<span class="rec-dot"></span>' + fmtTime((performance.now() - st0) / 1000));
   }, 250);
+  headerEl.classList.add('recording');
 
   const states = [], cursor = [], clicks = [], fileSwitches = [];
+  if (currentFileIndex >= 0) fileSwitches.push({ t: 0, fi: currentFileIndex });
   let cursorShowUntil = 0;
   let elapsedMs = 0;
   const livePosList = [], liveTList = [];   // 逐句光标位置/时段，循环结束后二遍统一发射采样
@@ -2017,6 +2561,8 @@ async function recordSpeech(){
   $('cursor').style.display = 'none';
 
   const lineEls = () => scriptBody.querySelectorAll('.script-line');
+  const liveHtmlStates = [];
+  let liveHtmlPage = 0;
 
   status('录制演讲中…自动操作 ' + scriptTimeline.length + ' 句（语音朗读 + 录音）');
 
@@ -2025,6 +2571,13 @@ async function recordSpeech(){
     const item = scriptTimeline[si];
     const startT = elapsedMs;
     item.startMs = startT;
+    if(source.type === 'html'){
+      const needle=(item.anchor || item.text || '').replace(/\s/g,'').replace(/[。！？]$/,'');
+      const found=needle && Array.isArray(source.slides) ? source.slides.findIndex(s=>s.replace(/\s/g,'').includes(needle)) : -1;
+      if(found>=0)liveHtmlPage=found;
+      liveHtmlStates.push({t:startT,fi:currentFileIndex,state:{slide:liveHtmlPage}});
+      htmlPresenter?.send('restore',{slide:liveHtmlPage});htmlPresenter?.send('mode',false);
+    }
 
     const els = lineEls();
     els.forEach((el, i) => el.classList.toggle('active', i === si));
@@ -2104,14 +2657,15 @@ async function recordSpeech(){
     v: 3, app: 'LectureLite', created: new Date().toISOString(),
     duration: totalDur / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
-    file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
-    files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+    file: { name: source.name, mime: sourceMime(source.type) },
+    files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
     fileSwitches,
     states, cursor, clicks,
     annotations: snapshotAnnotations(),
     annotationPopups: snapshotAnnotationPopups(),
     script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
       pause: s.pause || 0, key: s.key || undefined })),
+    htmlStates: liveHtmlStates,
     note: 'auto-generated timeline, chrome TTS, audio captured'
   };
 
@@ -2119,7 +2673,7 @@ async function recordSpeech(){
   $('btnExport').disabled = false;
   $('btnShare').disabled = false;  // 有音频了，可以分享
   btn.disabled = false;
-  btn.textContent = '录制演讲';
+  btn.textContent = '生成语音讲解';
   $('scriptRegen').disabled = false;
   recordingScript = false;
 
@@ -2128,7 +2682,8 @@ async function recordSpeech(){
   $('btnStop').disabled = true;
   $('btnStart').disabled = false;
   $('srcPick').disabled = false;
-  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(totalDur / 1000);
+  headerEl.classList.remove('recording');
+  renderRecIndicator('<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(totalDur / 1000));
 
   const audioSize = (audioBlob.size / 1048576).toFixed(1);
   status('录制演讲完成：' + fmtTime(totalDur / 1000) + '，音频 ' + audioSize + ' MB，' + states.length + ' 条状态 / ' + cursor.length + ' 个光标采样 → 可导出');
@@ -2155,6 +2710,7 @@ function pushScriptState(states, t){
 
 /* ---------- 一键生成演讲：在线 TTS 离线合成，免实时播放/录制 ---------- */
 let generatingSpeech = false;
+let generatingScript = false;
 
 // 编码 16bit PCM 单声道 WAV
 function encodeWavBlob(samples, sampleRate){
@@ -2180,7 +2736,21 @@ function encodeWavBlob(samples, sampleRate){
 // 滚动模仿人类操作：上一句快讲完时缓缓起滚、句间加速、下一句开始后缓缓收住（ease-in-out）；
 // LLM 规划的 op（highlight/underline/strike/comment）在对应时间点自动创建为标注。
 function buildOfflineStates(dursMs, gapMs){
+  if(source?.type === 'html'){
+    let elapsed = 0, page = 0;
+    htmlTimeline = scriptTimeline.map((item,i)=>{
+      const needle = (item.anchor || item.op?.target || item.text || '').replace(/\s/g,'').replace(/[。！？]$/,'');
+      const found = needle && Array.isArray(source.slides) ? source.slides.findIndex(text=>text.replace(/\s/g,'').includes(needle)) : -1;
+      if(found >= 0) page = found;
+      item.startMs = elapsed; item.endMs = elapsed + dursMs[i];
+      const row = {t:Math.round(elapsed),fi:currentFileIndex,state:{slide:page}};
+      elapsed += dursMs[i] + gapMs;
+      return row;
+    });
+    return {states:[{t:0,sr:0,y:0,s:null}],cursor:[],clicks:[],fileSwitches:[{t:0,fi:currentFileIndex}],newAnnotations:[],popupEvents:[],totalDurMs:Math.max(0,elapsed-gapMs)};
+  }
   const states = [], cursor = [], clicks = [], fileSwitches = [];
+  if (currentFileIndex >= 0) fileSwitches.push({ t: 0, fi: currentFileIndex });
   const newAnnotations = [];   // 本次生成新建的标注（用于去重与记录）
   const popupEvents = [];      // 批注气泡开合时间轴
   const curEl = $('cursor');
@@ -2348,7 +2918,8 @@ async function generateSpeech(){
   $('btnStop').disabled = true;
   $('srcPick').disabled = true;
   $('scriptEdgeVoice').disabled = true;
-  $('recTimer').innerHTML = '<span class="rec-dot" style="background:#c4423a;animation:none"></span>生成中…';
+  headerEl.classList.add('recording');
+  renderRecIndicator('<span class="rec-dot" style="background:#c4423a;animation:none"></span>生成中…');
 
   try {
     const rate = parseFloat($('scriptTtsRate').value) || 1;
@@ -2459,10 +3030,11 @@ async function generateSpeech(){
       v: 3, app: 'LectureLite', created: new Date().toISOString(),
       duration: tl.totalDurMs / 1000,
       viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
-      file: { name: source.name, mime: source.type === 'pdf' ? 'application/pdf' : 'text/markdown' },
-      files: files.map(f => ({ name: f.name, mime: f.mime || (f.type === 'pdf' ? 'application/pdf' : 'text/markdown'), type: f.type })),
+      file: { name: source.name, mime: sourceMime(source.type) },
+      files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
       fileSwitches: tl.fileSwitches,
       states: tl.states, cursor: tl.cursor, clicks: tl.clicks,
+      htmlStates: source.type === 'html' ? htmlTimeline : [],
       annotations: snapshotAnnotations(),
       annotationPopups: tl.popupEvents,
       script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
@@ -2471,21 +3043,22 @@ async function generateSpeech(){
     };
 
     recState = { audioBlob, json, finished: true };
-    $('recTimer').innerHTML = '<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration);
+    renderRecIndicator('<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration));
     const audioSize = audioBlob ? '，音频 ' + (audioBlob.size / 1048576).toFixed(1) + ' MB' : '，无语音';
     status('生成完成：' + fmtTime(json.duration) + audioSize + '，' + tl.states.length + ' 条状态 / ' + tl.cursor.length + ' 个光标点 / ' + tl.newAnnotations.length + ' 个自动标注 → 可导出');
   } finally {
     generatingSpeech = false;
     btn.disabled = false;
-    btn.textContent = '录制演讲';
+    btn.textContent = '生成语音讲解';
     $('scriptRegen').disabled = false;
     $('scriptEdgeVoice').disabled = false;
     $('srcPick').disabled = false;
     $('btnStart').disabled = false;
     $('btnStop').disabled = true;
+    headerEl.classList.remove('recording');
     const ready = recState && recState.finished;
     $('btnExport').disabled = !ready;
-    $('btnShare').disabled = !ready || !(recState && recState.audioBlob);
+    $('btnShare').disabled = !ready;
   }
 }
 
@@ -2553,15 +3126,134 @@ if (window.LectureLiteAnnotationTools){
   window.lectureLiteAnnotations = annotationTools;
 }
 
-// 从 URL 参数自动加载 zip (局域网分享)
+/* ---------- 账号 / 个人主页 ---------- */
+let me = null;            // 当前登录 UID
+let currentRecId = null;  // 当前播放包对应的录制 id（从主页打开或上传后已知）
+let currentFav = false;
+function apiJSON(url, opts){
+  return fetch(url, opts).then(async res => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  });
+}
+function showAuth(on){ $('authGate').classList.toggle('show', on); }
+function updateFavBtn(){
+  const b = $('btnFav');
+  const usable = !!(me && currentRecId);
+  b.classList.toggle('hidden', !usable);
+  b.disabled = !usable;
+  b.textContent = currentFav ? '★ 已收藏' : '☆ 收藏';
+}
+function setCurrentRec(id, fav){ currentRecId = id; currentFav = !!fav; updateFavBtn(); }
+async function refreshMe(){
+  try { me = (await apiJSON('/api/me')).uid; } catch(e){ me = null; }
+  $('homeBtn').classList.toggle('hidden', !me);
+  $('userChip').classList.toggle('hidden', !me);
+  $('logoutBtn').classList.toggle('hidden', !me);
+  if (me) $('userChip').textContent = me;
+  showAuth(!me);
+}
+let authMode = 'login';
+function setAuthMode(m){
+  authMode = m;
+  $('tabLogin').classList.toggle('on', m === 'login');
+  $('tabRegister').classList.toggle('on', m === 'register');
+  $('authSubmit').textContent = m === 'login' ? '登录' : '注册并登录';
+  $('authErr').textContent = '';
+}
+$('tabLogin').addEventListener('click', () => setAuthMode('login'));
+$('tabRegister').addEventListener('click', () => setAuthMode('register'));
+$('authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('authErr').textContent = '';
+  try {
+    const data = await apiJSON(authMode === 'login' ? '/api/login' : '/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: $('authUid').value.trim(), password: $('authPwd').value }),
+    });
+    me = data.uid;
+    refreshMe();
+  } catch(err){ $('authErr').textContent = err.message; }
+});
+$('logoutBtn').addEventListener('click', async () => {
+  try { await apiJSON('/api/logout', { method: 'POST' }); } catch(e){}
+  me = null; setCurrentRec(null, false);
+  refreshMe();
+});
+
+/* —— 主页在独立页面 /home.html —— */
+$('homeBtn').addEventListener('click', () => { location.href = '/home.html'; });
+
+/* —— 收藏当前播放的课程 —— */
+$('btnFav').addEventListener('click', async () => {
+  if (!currentRecId) return;
+  try {
+    const r = await apiJSON('/api/recordings/' + currentRecId + '/favorite', { method: 'POST' });
+    setCurrentRec(currentRecId, r.favorite);
+    status(r.favorite ? '已收藏，可在主页查看' : '已取消收藏');
+  } catch(err){ status('收藏失败：' + err.message, true); }
+});
+
+/* —— 播放进度：仅登录且有归属的录制，播放中每 5 秒上报一次；不写入录制包 —— */
+function currentPlaybackMs(){
+  if (!play) return 0;
+  if (play.hasAudio) return (play.audio && isFinite(play.audio.currentTime) ? play.audio.currentTime : 0) * 1000;
+  return getPlayTimeMs();
+}
+async function reportProgress(){
+  if (!me || !currentRecId || !play || !play.active) return;
+  const pos = Math.round(currentPlaybackMs());
+  if (pos <= 0) return;
+  try {
+    await fetch('/api/progress', {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recording_id: currentRecId, position_ms: pos }),
+    });
+  } catch(e){}
+}
+setInterval(reportProgress, 5000);
+window.addEventListener('pagehide', reportProgress);
+
+async function openRecording(id, title, fav){
+  status('正在加载录制…');
+  try {
+    const res = await fetch('/api/recordings/' + id + '/file');
+    if (!res.ok){
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || ('HTTP ' + res.status));
+    }
+    const blob = await res.blob();
+    setMode('play');
+    await loadZip(new File([blob], title || 'recording.lecture.zip', { type: 'application/zip' }));
+    setCurrentRec(id, fav);
+    status('已打开：' + (title || '录制'));
+  } catch(err){ status('打开录制失败：' + err.message, true); }
+}
+refreshMe();
+
+// 从 URL 参数自动加载 zip（分享链接 / 主页跳转；此时账号状态已初始化完毕）
 (function(){
   const params = new URLSearchParams(location.search);
   const src = params.get('src');
   if (!src) return;
   const srcDecoded = decodeURIComponent(src);
-  // 切换模式 + 加载
+  const mRec = srcDecoded.match(/^\/api\/recordings\/([a-zA-Z0-9_-]+)\/file/);
+  if (mRec){
+    setCurrentRec(mRec[1], false);
+    // URL 本身不带收藏态，从列表回查一次
+    apiJSON('/api/recordings').then(d => {
+      const it = [...(d.mine || []), ...(d.shared || []), ...(d.favorites || [])].find(x => x.id === mRec[1]);
+      if (it) setCurrentRec(it.id, it.favorite);
+    }).catch(() => {});
+  }
+  // 「继续播放」：URL 带 pos=毫秒 时，加载完成后直接定位
+  const posMs = parseInt(params.get('pos') || '0', 10);
+  if (posMs > 0) window.__pendingSeekMs = posMs;
   setMode('play');
-  status('正在加载分享文件: ' + srcDecoded + ' …');
+  status('正在加载: ' + srcDecoded + ' …');
   fetch(srcDecoded)
     .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); })
     .then(blob => {
@@ -2571,6 +3263,40 @@ if (window.LectureLiteAnnotationTools){
     .catch(err => status('加载分享文件失败: ' + err.message + ' — 可手动选择 zip 文件'));
 })();
 
+// One contextual instruction replaces guesswork around disabled controls.
+$('emptyImport').onclick = () => $('srcPick').click();
+$('emptyCourse').onclick = () => { setMode('play'); $('zipPick').click(); };
+let workflowText = '';
+function refreshWorkflow(){
+  const busy = (recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript;
+  const text = busy ? ((generatingSpeech || generatingScript) ? '正在生成 · 请等待完成，随后可预览、下载或保存到主页。' : '正在录制 · 点击「停止」完成，再预览、下载或保存到主页。')
+    : mode === 'play' ? (play ? '播放课程 · 空格暂停 / 继续，拖动进度定位；收藏后可在主页再次打开。' : '打开讲解包 · 选择 lecture.zip，或从主页打开已保存的课程。')
+    : recState?.finished ? '录制已完成 · 下载讲解包用于离线分发，或保存到主页后分享。'
+    : source ? (source.type === 'html' ? 'HTML 演示 · 用演示内的目录、翻页按钮操作；开始录制后记录翻页与滚动。' : '文档已就绪 · 开始录制你的声音，或用 AI 生成讲稿。选中文字即可标注。')
+    : '第 1 步 · 添加文档　→　第 2 步 · 录制讲解 / AI 生成　→　第 3 步 · 下载或保存';
+  if(text !== workflowText){ $('workflowHint').textContent = workflowText = text; }
+  $('btnAutoScript').disabled = !source || !!busy;
+  for(const id of ['btnExport','btnPreview','btnShare']) $(id).classList.toggle('hidden',!recState?.finished);
+  for(const id of ['btnAutoScript','btnWriteScript']) $(id).classList.toggle('hidden',!source);
+  if(!busy)$('scriptRecord').textContent=$('scriptTtsEnabled').checked ? '生成语音讲解' : '生成无声讲解';
+  $('btnWriteScript').disabled = !source || !!busy;
+  $('recordAudio').disabled = !!busy;
+  $('btnPreview').disabled = !recState?.finished || !!busy;
+  $('scriptEdit').disabled = !!busy;
+  $('scriptSave').disabled = !!busy || !scriptPanel.classList.contains('edit-mode');
+  $('srcFileBtn').disabled = !!busy; $('srcDirBtn').disabled = !!busy;
+  $('modeRec').setAttribute('aria-pressed',String(mode === 'rec'));
+  $('modePlay').setAttribute('aria-pressed',String(mode === 'play'));
+}
+setInterval(refreshWorkflow,350);
+updateTabs(); refreshWorkflow();
+$('btnPreview').onclick = ()=>{if(recState?.finished){setMode('play');startPlayback(recState);}};
+$('btnWriteScript').onclick = ()=>{
+  scriptPanel.classList.remove('hidden','collapsed');scriptPanel.classList.add('show','edit-mode');
+  scriptTextarea.value=lastGeneratedScript || '';scriptTextarea.focus();
+  status('每段一行写下要讲的话，保存后即可生成讲解；无需先调用 AI。');
+};
+window.addEventListener('beforeunload',e=>{if((recState && !recState.saved) || recordingScript || generatingSpeech || generatingScript){e.preventDefault();e.returnValue='';}});
 requestAnimationFrame(tick);
 </script>
 </body>
