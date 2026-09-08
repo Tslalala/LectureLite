@@ -135,6 +135,11 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
   color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
 #authSubmit:hover{ filter:brightness(.95); }
 .hidden{ display:none; }
+.feedback-modal{position:fixed;inset:0;z-index:110;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.34);backdrop-filter:blur(3px)}
+.feedback-modal.show{display:flex}.feedback-card{width:min(900px,94vw);max-height:88vh;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 22px 70px rgba(0,0,0,.28)}
+.feedback-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}.feedback-head strong{flex:1}.feedback-body{overflow:auto;padding:18px}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}.metric{background:var(--surface2);border-radius:10px;padding:12px}.metric b{display:block;font-size:24px}.metric span{font-size:12px;color:var(--dim)}
+.insight-section{margin:18px 0}.insight-section h3{font-size:14px;margin:0 0 8px}.insight-row{padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}.insight-row small{display:block;color:var(--dim);margin-top:4px}.reply-box{display:flex;gap:7px;margin-top:7px}.reply-box textarea{flex:1;min-height:54px;border:1px solid var(--line2);border-radius:8px;padding:7px;font:12px/1.5 inherit}.reply-box button{align-self:flex-end}
+@media(max-width:680px){.metric-grid{grid-template-columns:1fr}.feedback-card{width:96vw;max-height:92vh}}
 </style>
 <link rel="stylesheet" href="tools/home.css">
 </head>
@@ -168,6 +173,7 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
   </details></div>
 </main>
 <div id="status" role="status" aria-live="polite"></div>
+<div id="feedbackModal" class="feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle"><div class="feedback-card"><div class="feedback-head"><strong id="feedbackTitle">学习反馈</strong><button id="feedbackClose">×</button></div><div id="feedbackBody" class="feedback-body"></div></div></div>
 
 <div id="authGate">
   <div class="card">
@@ -229,6 +235,19 @@ function el(tag, cls, text){
   if (text != null) e.textContent = text;
   return e;
 }
+async function openFeedback(it){
+  const modal=$('feedbackModal'),body=$('feedbackBody');modal.classList.add('show');$('feedbackTitle').textContent='学习反馈 · '+(it.title||'未命名');body.textContent='正在加载…';
+  try{
+    const d=await apiJSON('/api/recordings/'+it.id+'/insights');body.replaceChildren();
+    const metrics=el('div','metric-grid');for(const [n,v] of [['匿名学习者',d.learners],['作答次数',d.attempts],['学习者提问',d.questions_count]]){const m=el('div','metric');m.appendChild(el('b',null,String(v||0)));m.appendChild(el('span',null,n));metrics.appendChild(m);}body.appendChild(metrics);
+    const qs=el('section','insight-section');qs.appendChild(el('h3',null,'题目表现'));
+    for(const [key,s] of Object.entries(d.by_question||{})){const row=el('div','insight-row',key+' · '+s.attempts+'次 · 正确率 '+Math.round((s.correct_rate||0)*100)+'%');row.appendChild(el('small',null,(s.answers||[]).slice(0,5).join(' ｜ ')));qs.appendChild(row);}if(!Object.keys(d.by_question||{}).length)qs.appendChild(el('div','empty','还没有作答数据'));body.appendChild(qs);
+    const hot=el('section','insight-section');hot.appendChild(el('h3',null,'困难时间点'));for(const h of d.hotspots||[])hot.appendChild(el('div','insight-row',fmtMs(h.position_ms)+' · '+h.count+'次暂停/回看'));if(!(d.hotspots||[]).length)hot.appendChild(el('div','empty','暂无明显困难点'));body.appendChild(hot);
+    const inbox=el('section','insight-section');inbox.appendChild(el('h3',null,'问题收件箱'));
+    for(const q of d.questions||[]){const row=el('div','insight-row');row.appendChild(el('b',null,q.question));row.appendChild(el('small',null,fmtMs(q.at_ms)+' · '+(q.status||'待处理')));row.appendChild(el('div',null,'AI：'+(q.ai_answer||'')));if(q.author_reply)row.appendChild(el('div','author-reply','作者：'+q.author_reply));else{const box=el('div','reply-box'),ta=el('textarea');ta.placeholder='补充给学习者的回复';const send=el('button','mini','回复');send.onclick=async()=>{const reply=ta.value.trim();if(!reply)return;send.disabled=true;try{await apiJSON('/api/recordings/'+it.id+'/questions/'+q.id+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reply})});status('已回复');openFeedback(it);}catch(e){status('回复失败：'+e.message);}finally{send.disabled=false;}};box.append(ta,send);row.appendChild(box);}inbox.appendChild(row);}if(!(d.questions||[]).length)inbox.appendChild(el('div','empty','还没有学习者提问'));body.appendChild(inbox);
+  }catch(err){body.textContent='加载失败：'+err.message;}
+}
+$('feedbackClose').onclick=()=>$('feedbackModal').classList.remove('show');$('feedbackModal').onclick=e=>{if(e.target===$('feedbackModal'))$('feedbackModal').classList.remove('show');};
 async function toggleFav(it){
   try {
     const r = await apiJSON('/api/recordings/' + it.id + '/favorite', { method: 'POST' });
@@ -383,7 +402,9 @@ function renderItem(it, opts){
     sub.appendChild(lb);
     const del = el('button', 'mini danger', '删除');
     del.addEventListener('click', () => deleteRec(it));
-    sub.appendChild(del);
+    const feedback = el('button', 'mini', '学习反馈');
+    feedback.addEventListener('click', () => openFeedback(it));
+    sub.appendChild(feedback); sub.appendChild(del);
     sub.appendChild(box); sub.appendChild(links); li.appendChild(sub);
     apiJSON('/api/recordings/' + it.id + '/links').then(r => {
       const active = r.links.filter(l => !l.revoked);

@@ -10,6 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <link rel="stylesheet" href="tools/annotations.css">
+<link rel="stylesheet" href="tools/interactions.css">
 <script src="tools/tool-registry.js"></script>
 <script src="tools/highlight.js"></script>
 <script src="tools/underline.js"></script>
@@ -19,6 +20,7 @@
 <script src="tools/sticker.js"></script>
 <script src="tools/selection-toolbar.js"></script>
 <script src="tools/html-presenter.js"></script>
+<script src="tools/interactions.js"></script>
 <style>
 :root{
   --bg:#FAFAF8; --surface:#FFFFFF; --surface2:#F4F4F1;
@@ -530,6 +532,7 @@ let timerIv = null;
 let annotations = [];   // [{t,type,fi,offsets|coords,text?,icon?}]
 let annotationPopupEvents = []; // [{t,id,fi,open}] 批注气泡显隐时间轴
 let annotationTools = null;
+let interactionUI = null;
 
 // html:false：不渲染 Markdown 里的原始 HTML（分享包中的 md 是外部输入，防存储型 XSS）
 const md = window.markdownit ? markdownit({ html:false, linkify:true, breaks:false }) : null;
@@ -1522,7 +1525,7 @@ async function stopRec(){
 
   const audioBlob = rec ? new Blob(chunks, { type: rec.mimeType || 'audio/webm' }) : null;
   const json = {
-    v: 3, app: 'LectureLite', created: new Date().toISOString(),
+    v: 4, app: 'LectureLite', created: new Date().toISOString(),
     duration: (performance.now() - st0) / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
     // 兼容旧格式：若有多个文件用 files，否则保留 file
@@ -1531,7 +1534,8 @@ async function stopRec(){
     fileSwitches,
     states, cursor, clicks, htmlStates:htmlTimeline,
     annotations: snapshotAnnotations(),
-    annotationPopups: snapshotAnnotationPopups()
+    annotationPopups: snapshotAnnotationPopups(),
+    interactions: interactionUI?.exportQuestions() || []
   };
   recState = { audioBlob, json, finished: true };
 
@@ -1796,6 +1800,7 @@ function startPlayback({ json, audioBlob }){
     // 无音频时用计时器模拟 currentTime
     _timerStart: 0, _timerBase: seek0 > 0 ? Math.min(seek0, Math.max(0, dur * 1000)) / 1000 : 0
   };
+  interactionUI?.setCourse(json);
   if (hasAudio){
     audio.addEventListener('loadedmetadata', () => {
       const d = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : dur;
@@ -1937,6 +1942,7 @@ $('seek').addEventListener('input', async e => {
     play._timerBase = t; play._timerStart = performance.now();
   }
   const tMs = t * 1000;
+  interactionUI?.onSeek(tMs);
   $('time').textContent = fmtTime(t) + ' / ' + fmtTime(play.dur);
   play.clickIdx = 0;
   for (let i = 0; i < play.clicks.length; i++){ if (play.clicks[i].t <= tMs) play.clickIdx++; }
@@ -2193,6 +2199,7 @@ function tick(){
     });
     applyCursor(t); runClicks(t); renderAnnotations(t);
     updateSubtitle(t);   // CC 字幕（暂停拖动进度时也随 getPlayTimeMs 刷新）
+    interactionUI?.tick(t);
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
     const dur = play.dur || 0;
@@ -2779,7 +2786,7 @@ async function recordSpeech(){
   const audioBlob = new Blob(audioChunks, { type: rec.mimeType || 'audio/webm' });
 
   const json = {
-    v: 3, app: 'LectureLite', created: new Date().toISOString(),
+    v: 4, app: 'LectureLite', created: new Date().toISOString(),
     duration: totalDur / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
     file: { name: source.name, mime: sourceMime(source.type) },
@@ -2788,6 +2795,7 @@ async function recordSpeech(){
     states, cursor, clicks,
     annotations: snapshotAnnotations(),
     annotationPopups: snapshotAnnotationPopups(),
+    interactions: interactionUI?.exportQuestions() || [],
     script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
       pause: s.pause || 0, key: s.key || undefined })),
     htmlStates: liveHtmlStates,
@@ -3210,7 +3218,7 @@ async function generateSpeech(){
     const tl = buildOfflineStates(dursMs, gapMs);
 
     const json = {
-      v: 3, app: 'LectureLite', created: new Date().toISOString(),
+      v: 4, app: 'LectureLite', created: new Date().toISOString(),
       duration: tl.totalDurMs / 1000,
       viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
       file: { name: source.name, mime: sourceMime(source.type) },
@@ -3220,6 +3228,7 @@ async function generateSpeech(){
       htmlStates: source.type === 'html' ? htmlTimeline : [],
       annotations: snapshotAnnotations(),
       annotationPopups: tl.popupEvents,
+      interactions: interactionUI?.exportQuestions() || [],
       script: scriptTimeline.map(s => ({ text: s.text, anchor: s.anchor, t: s.startMs, d: s.endMs - s.startMs,
         op: s.op || undefined, pause: s.pause || 0, key: s.key || undefined })),
       note: audioBlob ? 'auto-generated timeline, edge-tts offline synthesis' : 'auto-generated timeline, no audio'
@@ -3418,6 +3427,8 @@ refreshMe();
   const params = new URLSearchParams(location.search);
   const src = params.get('src');
   if (!src) return;
+  const sharedRid = (params.get('rid') || '').match(/^[a-zA-Z0-9_-]+$/)?.[0];
+  if (sharedRid) setCurrentRec(sharedRid, false);
   const srcDecoded = decodeURIComponent(src);
   const mRec = srcDecoded.match(/^\/api\/recordings\/([a-zA-Z0-9_-]+)\/file/);
   if (mRec){
@@ -3474,6 +3485,49 @@ $('btnWriteScript').onclick = ()=>{
   scriptTextarea.value=lastGeneratedScript || '';scriptTextarea.focus();
   status('每段一行写下要讲的话，保存后即可生成讲解；无需先调用 AI。');
 };
+interactionUI = window.LectureLiteInteractions?.create({
+  stage,
+  seek: $('seek'),
+  playButton: $('btnPlay'),
+  authorActions: $('scriptPanel-actions'),
+  getPlaybackMs: () => currentPlaybackMs(),
+  isPlaying: () => !!play?.active,
+  pause: () => { if (play?.active) $('btnPlay').click(); },
+  resume: () => { if (play && !play.active) $('btnPlay').click(); },
+  seekTo: ms => {
+    if (!play) return;
+    $('seek').value = Math.max(0, Math.min(Number($('seek').max)||0, Math.round(ms / 10)));
+    $('seek').dispatchEvent(new Event('input', { bubbles: true }));
+  },
+  getRecordingId: () => currentRecId,
+  getAccess: () => {
+    const src = decodeURIComponent(new URLSearchParams(location.search).get('src') || '');
+    const match = src.match(/^\/api\/link\/([a-zA-Z0-9_-]+)\/file(?:\?(.+))?/);
+    if (!match) return {};
+    return { share_id: match[1], share_token: new URLSearchParams(match[2] || '').get('tk') || '' };
+  },
+  getContext: () => {
+    const t = currentPlaybackMs();
+    const script = play?.script || [];
+    let sentence = '';
+    for (const row of script) if ((row.t || 0) <= t) sentence = row.text || sentence; else break;
+    return {
+      position_ms: Math.round(t), file_index: currentFileIndex,
+      file_name: files[currentFileIndex]?.name || source?.name || '',
+      slide: htmlPresenter?.state?.()?.slide ?? null,
+      subtitle: sentence,
+      nearby_script: script.filter(row => Math.abs((row.t || 0) - t) < 45000).map(row => row.text).join('\n').slice(0, 6000)
+    };
+  },
+  getAuthorContext: () => ({
+    content: getDocText().slice(0, 20000),
+    script: scriptTimeline.map(s => ({ text:s.text, anchor:s.anchor, t:s.startMs || 0, key:!!s.key })),
+    durationMs: scriptTimeline.length ? Math.max(...scriptTimeline.map(s => s.endMs || s.startMs || 0)) : 0,
+    topic: source?.name || ''
+  }),
+  onQuestionsChanged: questions => { if (recState?.finished && recState.json) recState.json.interactions = questions; },
+  notify: status
+});
 window.addEventListener('beforeunload',e=>{if((recState && !recState.saved) || recordingScript || generatingSpeech || generatingScript){e.preventDefault();e.returnValue='';}});
 requestAnimationFrame(tick);
 </script>

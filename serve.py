@@ -16,7 +16,7 @@
 - 不做跨域（CORS 一律不发头，前端与服务同源）
 """
 
-import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading, asyncio, base64, tempfile, time, secrets, hashlib, ssl, shutil, subprocess
+import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading, asyncio, base64, tempfile, time, secrets, hashlib, ssl, shutil, subprocess, zipfile
 from http.cookies import SimpleCookie
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -31,6 +31,13 @@ except ImportError:
     _gen_script = None
     _gen_script_stream = None
     _gen_script_timeline_stream = None
+
+try:
+    from llm.learning_feedback import generate_interactions as _gen_interactions
+    from llm.learning_feedback import grade_short_answer as _grade_short_answer
+    from llm.learning_feedback import answer_question as _answer_course_question
+except ImportError:
+    _gen_interactions = _grade_short_answer = _answer_course_question = None
 
 # ── edge-tts 语音合成（按需导入，无 edge-tts 包也能工作）──
 try:
@@ -48,6 +55,7 @@ DATA_DIR = WEB_DIR / "data"
 DB_FILE = DATA_DIR / "store.json"
 CERT_DIR = WEB_DIR / "cert"
 SESSION_COOKIE = "ll_user"
+LEARNER_COOKIE = "ll_learner"
 PBKDF2_ITERS = 200_000
 SHARE_TOKEN_BYTES = 24        # 分享令牌熵
 AUTH_MAX_ATTEMPTS = 10        # 登录/注册限速：每 IP+UID 5 分钟内最多尝试次数
@@ -84,9 +92,12 @@ LAN_IP = "127.0.0.1"
 _store_lock = threading.RLock()
 _sessions = {}  # session token -> uid
 _auth_attempts = {}  # "ip|uid" -> [timestamps]
+_learn_attempts = {}  # "ip|action" -> [timestamps]
 _db = {
     "users": {}, "recordings": {}, "recording_shares": {},
     "user_favorites": {}, "user_progress": {}, "share_links": {},
+    "learner_sessions": {}, "interaction_attempts": {}, "learner_questions": {},
+    "author_replies": {}, "learning_events": {},
 }
 
 
@@ -148,6 +159,21 @@ def _save_store():
     os.replace(tmp, DB_FILE)
 
 
+def _delete_learning_data_locked(rid):
+    """Delete all anonymous learning data for a permanently removed recording.
+
+    Caller must hold ``_store_lock``.
+    """
+    session_ids = {sid for sid, row in _db["learner_sessions"].items()
+                   if row.get("recording_id") == rid}
+    for sid in session_ids:
+        _db["learner_sessions"].pop(sid, None)
+        _db["interaction_attempts"].pop(sid, None)
+    _db["learner_questions"].pop(rid, None)
+    _db["author_replies"].pop(rid, None)
+    _db["learning_events"].pop(rid, None)
+
+
 def _seed_demo_courses():
     """Register the single built-in guide; retire only the previous built-in demos."""
     package = DEMO_DIR / "教你使用lecturelite.lecture.zip"
@@ -191,6 +217,7 @@ def _purge_expired_trash():
                 favs.pop(rid, None)
             for prog in _db["user_progress"].values():
                 prog.pop(rid, None)
+            _delete_learning_data_locked(rid)
         if removed:
             _save_store()
     for stored in removed:
@@ -317,6 +344,65 @@ def _create_share_link(owner, rid):
     return sid, token
 
 
+def _valid_share_access(rid, sid, token):
+    """Validate unlisted-link access without leaking whether a recording exists."""
+    link = _db["share_links"].get(str(sid or ""))
+    if not link or link.get("rec_id") != rid or link.get("revoked"):
+        return False
+    if link.get("expires_at") and time.time() > link["expires_at"]:
+        return False
+    digest = hashlib.sha256(str(token or "").encode()).hexdigest()
+    return bool(token) and secrets.compare_digest(digest, link.get("token_hash", ""))
+
+
+def _course_json(rid):
+    rec = _rec_visible(rid)
+    if not rec:
+        return {}
+    path = SHARED_DIR / rec.get("stored", "")
+    try:
+        with zipfile.ZipFile(path) as zf:
+            raw = zf.read("lecture.json")
+        data = json.loads(raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return {}
+
+
+def _interaction_from_course(rid, interaction_id, revision):
+    for item in _course_json(rid).get("interactions") or []:
+        if item.get("id") == interaction_id and int(item.get("revision") or 1) == int(revision or 1):
+            return item
+    return None
+
+
+def _learning_context(rid, client_context=None):
+    course = _course_json(rid)
+    position = max(0, int((client_context or {}).get("position_ms") or 0))
+    script = course.get("script") or []
+    nearby = [row for row in script if abs(int(row.get("t") or 0) - position) <= 45000]
+    return {
+        "position_ms": position,
+        "time": f"{position//60000}:{(position//1000)%60:02d}",
+        "file_name": str((client_context or {}).get("file_name") or "")[:300],
+        "slide": (client_context or {}).get("slide"),
+        "subtitle": str((client_context or {}).get("subtitle") or "")[:1000],
+        "nearby_script": "\n".join(str(x.get("text") or "") for x in nearby)[:8000],
+        "client_excerpt": str((client_context or {}).get("nearby_script") or "")[:4000],
+    }
+
+
+def _learn_rate_ok(ip, action, limit=40, window=3600):
+    now = time.time(); key = f"{ip}|{action}"
+    with _store_lock:
+        stamps = [x for x in _learn_attempts.get(key, []) if now - x < window]
+        if len(stamps) >= limit:
+            _learn_attempts[key] = stamps
+            return False
+        stamps.append(now); _learn_attempts[key] = stamps
+    return True
+
+
 def get_lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -415,19 +501,59 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_session_cookie(self):
         token = getattr(self, "_cookie_to_set", None)
-        if token is None:
-            return
         if token == "":
             self.send_header(
                 "Set-Cookie",
                 f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
             )
-        else:
+        elif token is not None:
             self.send_header(
                 "Set-Cookie",
                 f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict",
             )
-        self._cookie_to_set = None
+        if token is not None:
+            self._cookie_to_set = None
+        learner = getattr(self, "_learner_cookie_to_set", None)
+        if learner:
+            self.send_header(
+                "Set-Cookie",
+                f"{LEARNER_COOKIE}={learner}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000",
+            )
+            self._learner_cookie_to_set = None
+
+    def _learner_session(self, rid=None):
+        try:
+            cookies = SimpleCookie(self.headers.get("Cookie", ""))
+            morsel = cookies.get(LEARNER_COOKIE)
+            if not morsel or "." not in morsel.value:
+                return None, None
+            sid, token = morsel.value.split(".", 1)
+            row = _db["learner_sessions"].get(sid)
+            if not row or (rid and row.get("recording_id") != rid):
+                return None, None
+            if not secrets.compare_digest(hashlib.sha256(token.encode()).hexdigest(), row.get("token_hash", "")):
+                return None, None
+            return sid, row
+        except (TypeError, ValueError, KeyError):
+            return None, None
+
+    def _learning_access(self, rid, data=None):
+        data = data or {}
+        uid = self._session_uid()
+        if _can_view(uid, rid):
+            return True
+        if _valid_share_access(rid, data.get("share_id"), data.get("share_token")):
+            return True
+        sid, row = self._learner_session(rid)
+        if not sid or not row:
+            return False
+        share_id = row.get("access_share_id")
+        if not share_id:
+            return False
+        link = _db["share_links"].get(share_id)
+        return bool(link and link.get("rec_id") == rid and not link.get("revoked")
+                    and (not link.get("expires_at") or time.time() <= link["expires_at"])
+                    and _rec_visible(rid))
 
     def do_OPTIONS(self):
         self._send(204)
@@ -611,6 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                 favs.pop(rec_id, None)
             for prog in _db["user_progress"].values():
                 prog.pop(rec_id, None)
+            _delete_learning_data_locked(rec_id)
             _save_store()
             stored = rec["stored"]
         try:
@@ -766,6 +893,178 @@ class Handler(BaseHTTPRequestHandler):
             _save_store()
         self._send_json(200, {"success": True})
 
+    # ── 互动学习与匿名学习档案 ──
+    def _handle_learn_session(self):
+        data, err = self._read_json_body(16384)
+        if err: return
+        rid = str(data.get("recording_id") or "")
+        if not self._learning_access(rid, data):
+            return self._send_json(404, {"error": "课程不可用或分享链接已失效"})
+        sid, row = self._learner_session(rid)
+        now = int(time.time())
+        if not sid:
+            sid, token = uuid.uuid4().hex[:16], secrets.token_urlsafe(24)
+            share_id = str(data.get("share_id") or "") if _valid_share_access(rid, data.get("share_id"), data.get("share_token")) else None
+            row = {"recording_id": rid, "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                   "access_share_id": share_id, "created": now, "last_seen": now}
+            with _store_lock:
+                _db["learner_sessions"][sid] = row; _save_store()
+            self._learner_cookie_to_set = f"{sid}.{token}"
+        else:
+            with _store_lock:
+                row["last_seen"] = now; _save_store()
+        attempts = list(_db["interaction_attempts"].get(sid, []))
+        questions = [{k:v for k,v in q.items() if k != "learner_sid"}
+                     for q in _db["learner_questions"].get(rid, {}).values() if q.get("learner_sid") == sid]
+        self._send_json(200, {"success": True, "attempts": attempts, "questions": questions})
+
+    def _handle_learn_state(self, rid):
+        sid, _ = self._learner_session(rid)
+        if not sid or not self._learning_access(rid):
+            return self._send_json(403, {"error": "学习会话无效或分享已撤销"})
+        attempts = list(_db["interaction_attempts"].get(sid, []))
+        questions = [{k:v for k,v in q.items() if k != "learner_sid"}
+                     for q in _db["learner_questions"].get(rid, {}).values() if q.get("learner_sid") == sid]
+        self._send_json(200, {"attempts": attempts, "questions": questions})
+
+    def _handle_learn_attempt(self, rid):
+        data, err = self._read_json_body(65536)
+        if err: return
+        sid, _ = self._learner_session(rid)
+        if not sid or not self._learning_access(rid, data): return self._send_json(403, {"error":"学习会话无效"})
+        interaction_id = str(data.get("interaction_id") or "")[:128]
+        revision = max(1, int(data.get("revision") or 1))
+        item = _interaction_from_course(rid, interaction_id, revision)
+        if not item: return self._send_json(409, {"error":"题目已更新，请重新打开课程"})
+        answer = str(data.get("answer") or "")[:2000].strip()
+        if not answer: return self._send_json(400, {"error":"答案不能为空"})
+        context = _learning_context(rid, data.get("context"))
+        result, feedback, evidence, review_ms = "等待反馈", "答案已保存，稍后可回来查看反馈。", "", item.get("atMs",0)
+        if item.get("type") == "single_choice":
+            ok = answer in (item.get("correctOptionIds") or [])
+            result = "correct" if ok else "incorrect"
+            feedback = ("回答正确。" if ok else "还需要再想一想。") + (str(item.get("explanation") or ""))
+            evidence = (item.get("anchor") or {}).get("quote") or context["time"]
+        elif _grade_short_answer and _learn_rate_ok(self.client_address[0], "grade", 30):
+            try:
+                graded = _grade_short_answer({"prompt":item.get("prompt"),"rubric":item.get("rubric"),
+                                              "explanation":item.get("explanation")}, answer, context)
+                result = graded.get("result", result); feedback = str(graded.get("feedback") or feedback)[:3000]
+                evidence = str(graded.get("evidence") or "")[:1000]; review_ms = max(0,int(graded.get("review_ms") or review_ms))
+            except Exception:
+                pass
+        row = {"interaction_id":interaction_id,"revision":revision,"type":item.get("type"),"answer":answer,
+               "result":result,"feedback":feedback,"evidence":evidence,"review_ms":review_ms,
+               "at_ms":int(item.get("atMs") or 0),"created":int(time.time()*1000)}
+        with _store_lock:
+            rows = _db["interaction_attempts"].setdefault(sid, [])
+            rows[:] = [x for x in rows if not (x.get("interaction_id")==interaction_id and int(x.get("revision") or 1)==revision)]
+            rows.append(row); _save_store()
+        self._send_json(200, row)
+
+    def _handle_learn_question(self, rid):
+        data, err = self._read_json_body(65536)
+        if err: return
+        sid, _ = self._learner_session(rid)
+        if not sid or not self._learning_access(rid, data): return self._send_json(403,{"error":"学习会话无效"})
+        question = str(data.get("question") or "").strip()[:1000]
+        if not question: return self._send_json(400,{"error":"问题不能为空"})
+        if not _learn_rate_ok(self.client_address[0], "question", 40): return self._send_json(429,{"error":"提问过于频繁，请稍后再试"})
+        context = _learning_context(rid, data.get("context")); answer="问题已保存，等待作者反馈。"; evidence=""; confidence="low"
+        if _answer_course_question:
+            try:
+                reply = _answer_course_question(question, context)
+                answer = str(reply.get("answer") or answer)[:5000]; evidence = str(reply.get("evidence") or "")[:1000]
+                confidence = reply.get("confidence") if reply.get("confidence") in ("high","low") else "low"
+            except Exception:
+                pass
+        qid = "lq_"+uuid.uuid4().hex[:12]; now=int(time.time()*1000)
+        row={"id":qid,"learner_sid":sid,"question":question,"at_ms":context["position_ms"],
+             "context":{"time":context["time"],"file_name":context["file_name"],"slide":context["slide"],"subtitle":context["subtitle"]},
+             "ai_answer":answer,"evidence":evidence,"confidence":confidence,
+             "status":"ai_answered" if confidence=="high" else "pending_author","created":now}
+        with _store_lock:
+            _db["learner_questions"].setdefault(rid,{})[qid]=row; _save_store()
+        self._send_json(200,{k:v for k,v in row.items() if k!="learner_sid"})
+
+    def _handle_learn_event(self, rid):
+        data, err = self._read_json_body(16384)
+        if err: return
+        sid, _ = self._learner_session(rid)
+        if not sid or not self._learning_access(rid, data):
+            return self._send_json(403,{"error":"学习会话无效或分享已撤销"})
+        kind = str(data.get("type") or "")
+        if kind not in ("play","pause","skip","checkpoint","replay","complete"):
+            return self._send_json(400,{"error":"未知事件"})
+        row={"session":sid,"type":kind,"position_ms":max(0,int(data.get("position_ms") or 0)),
+             "interaction_id":str(data.get("interaction_id") or "")[:128] or None,"created":int(time.time()*1000)}
+        with _store_lock:
+            rows=_db["learning_events"].setdefault(rid,[]);rows.append(row)
+            if len(rows)>10000: del rows[:-10000]
+            _save_store()
+        self._send_json(200,{"success":True})
+
+    def _handle_generate_interactions(self):
+        if not self._session_uid(): return self._send_json(401,{"error":"未登录"})
+        if not _gen_interactions: return self._send_json(503,{"error":"互动题生成服务不可用"})
+        if not _heavy_lock.acquire(blocking=False): return self._send_json(429,{"error":"服务器繁忙，请稍后再试"})
+        try:
+            data,err=self._read_json_body(2*1024*1024)
+            if err:return
+            content=str(data.get("content") or "")[:20000];script=data.get("script") or []
+            if not content and not script:return self._send_json(400,{"error":"请先生成讲稿或加载课程内容"})
+            items=_gen_interactions(content,script,str(data.get("topic") or ""))
+            now=int(time.time()*1000)
+            clean=[]
+            for i,q in enumerate(items[:8]):
+                if not isinstance(q,dict):continue
+                q["id"]=str(q.get("id") or f"q_{now}_{i}")[:128];q["revision"]=1;q["approved"]=False
+                q["previewMs"]=30000;q["atMs"]=max(0,int(q.get("atMs") or 0));clean.append(q)
+            self._send_json(200,{"interactions":clean})
+        except Exception as e:self._send_json(500,{"error":"互动题生成失败: "+str(e)[:500]})
+        finally:_heavy_lock.release()
+
+    def _handle_insights(self, rid):
+        uid=self._session_uid()
+        if not _rec_for_owner(rid,uid):return self._send_json(403,{"error":"只能查看自己课程的反馈"})
+        session_ids=[sid for sid,row in _db["learner_sessions"].items() if row.get("recording_id")==rid]
+        attempts=[a for sid in session_ids for a in _db["interaction_attempts"].get(sid,[])]
+        events=_db["learning_events"].get(rid,[]); questions=list(_db["learner_questions"].get(rid,{}).values())
+        byq={}
+        for a in attempts:
+            key=f"{a.get('interaction_id')}@{a.get('revision',1)}";s=byq.setdefault(key,{"attempts":0,"correct":0,"results":{},"answers":[]})
+            s["attempts"]+=1;s["correct"]+=a.get("result") in ("correct","理解正确")
+            s["results"][a.get("result")]=s["results"].get(a.get("result"),0)+1
+            s["answers"].append(str(a.get("answer") or "")[:500])
+        for s in byq.values():s["correct_rate"]=round(s["correct"]/max(1,s["attempts"]),3)
+        hotspots={}
+        for e in events:
+            if e.get("type") in ("pause","replay","checkpoint"):
+                bucket=int(e.get("position_ms") or 0)//10000*10000;hotspots[bucket]=hotspots.get(bucket,0)+1
+        self._send_json(200,{"learners":len(session_ids),"attempts":len(attempts),"questions_count":len(questions),
+                            "by_question":byq,"hotspots":sorted(({"position_ms":k,"count":v} for k,v in hotspots.items()),key=lambda x:-x["count"])[:10],
+                            "questions":[{k:v for k,v in q.items() if k!="learner_sid"} for q in questions]})
+
+    def _handle_author_questions(self, rid):
+        uid=self._session_uid()
+        if not _rec_for_owner(rid,uid):return self._send_json(403,{"error":"只能查看自己课程的问题"})
+        rows=[{k:v for k,v in q.items() if k!="learner_sid"} for q in _db["learner_questions"].get(rid,{}).values()]
+        rows.sort(key=lambda x:-int(x.get("created") or 0));self._send_json(200,{"questions":rows})
+
+    def _handle_author_reply(self, rid, qid):
+        uid=self._session_uid()
+        if not _rec_for_owner(rid,uid):return self._send_json(403,{"error":"只能回复自己课程的问题"})
+        data,err=self._read_json_body(16384)
+        if err:return
+        text=str(data.get("reply") or "").strip()[:3000]
+        if not text:return self._send_json(400,{"error":"回复不能为空"})
+        with _store_lock:
+            q=_db["learner_questions"].get(rid,{}).get(qid)
+            if not q:return self._send_json(404,{"error":"问题不存在"})
+            q["author_reply"]=text;q["status"]="author_replied";q["replied_at"]=int(time.time()*1000)
+            _db["author_replies"][qid]={"recording_id":rid,"reply":text,"created":q["replied_at"]};_save_store()
+        self._send_json(200,{"success":True,"question":{k:v for k,v in q.items() if k!="learner_sid"}})
+
     def _handle_ppt_convert(self):
         """Convert an uploaded PowerPoint file to PDF for the existing PDF renderer."""
         if not self._session_uid():
@@ -919,6 +1218,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_me()
         if path == "/api/recordings":
             return self._handle_recordings_list()
+        if path.startswith("/api/learn/") and path.endswith("/state"):
+            return self._handle_learn_state(path[len("/api/learn/"):-len("/state")])
+        if path.startswith("/api/recordings/") and path.endswith("/insights"):
+            return self._handle_insights(path[len("/api/recordings/"):-len("/insights")])
+        if path.startswith("/api/recordings/") and path.endswith("/questions"):
+            return self._handle_author_questions(path[len("/api/recordings/"):-len("/questions")])
         if path == "/api/progress":
             return self._send_json(405, {"error": "用 POST 提交进度"})
         m = None
@@ -933,9 +1238,13 @@ class Handler(BaseHTTPRequestHandler):
             sid = path[len("/s/"):]
             params = urllib.parse.parse_qs(self.path.split("?", 1)[-1]) if "?" in self.path else {}
             tk = (params.get("tk") or [""])[0]
+            with _store_lock:
+                rid = (_db["share_links"].get(sid) or {}).get("rec_id")
+                if not rid or not _valid_share_access(rid, sid, tk):
+                    return self._send(404, b"Not Found", "text/plain")
             file_url = "/api/link/" + sid + "/file" + (f"?tk={urllib.parse.quote(tk)}" if tk else "")
             self.send_response(302)
-            self.send_header("Location", "/lecture-lite.html?src=" + urllib.parse.quote(file_url, safe=""))
+            self.send_header("Location", "/lecture-lite.html?src=" + urllib.parse.quote(file_url, safe="") + "&rid=" + urllib.parse.quote(rid))
             self.end_headers()
             return
         if path.startswith("/api/link/") and path.endswith("/file"):
@@ -961,9 +1270,11 @@ class Handler(BaseHTTPRequestHandler):
         known = ("/api/register", "/api/login", "/api/logout", "/api/convert-ppt", "/api/compress-audio",
                  "/api/upload", "/share", "/api/progress",
                  "/generate-script", "/generate-script-stream",
-                 "/generate-script-timeline", "/generate-speech-stream")
+                 "/generate-script-timeline", "/generate-speech-stream", "/generate-interactions",
+                 "/api/learn/session")
         if path not in known and not (path.startswith("/api/recordings/")
-                                      and len(path.strip("/").split("/")) in (4, 5)):
+                                      and len(path.strip("/").split("/")) in (4, 5, 6)) \
+                and not path.startswith("/api/learn/"):
             return self._send(404, b"Not Found", "text/plain")
         if path == "/api/register":
             return self._handle_register()
@@ -979,8 +1290,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_upload()
         if path == "/api/progress":
             return self._handle_progress()
+        if path == "/api/learn/session":
+            return self._handle_learn_session()
+        if path.startswith("/api/learn/"):
+            parts=path.strip("/").split("/")
+            if len(parts)==4:
+                rid,action=parts[2],parts[3]
+                if action=="attempts":return self._handle_learn_attempt(rid)
+                if action=="questions":return self._handle_learn_question(rid)
+                if action=="events":return self._handle_learn_event(rid)
+            return self._send_json(404,{"error":"未知学习接口"})
         if path.startswith("/api/recordings/"):
             parts = path.strip("/").split("/")
+            if len(parts)==6 and parts[3]=="questions" and parts[5]=="reply":
+                return self._handle_author_reply(parts[2],parts[4])
             if len(parts) == 4:                  # api/recordings/<id>/<action>
                 rid, action = parts[2], parts[3]
                 if action == "favorite":
@@ -1010,6 +1333,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_generate_script_timeline()
         elif path == "/generate-speech-stream":
             self._handle_generate_speech_stream()
+        elif path == "/generate-interactions":
+            self._handle_generate_interactions()
 
     # ── 请求体读取（先于任何响应头，失败可安全返回普通错误码）──
     def _read_json_body(self, max_bytes):
