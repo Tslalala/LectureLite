@@ -16,7 +16,7 @@
 - 不做跨域（CORS 一律不发头，前端与服务同源）
 """
 
-import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading, asyncio, base64, tempfile, time, secrets, hashlib, ssl, shutil
+import sys, os, json, uuid, socket, webbrowser, urllib.parse, threading, asyncio, base64, tempfile, time, secrets, hashlib, ssl, shutil, subprocess
 from http.cookies import SimpleCookie
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -57,6 +57,7 @@ DEMO_DIR = WEB_DIR / "demo"       # 示例课程包（不可删除，自动出�
 
 # ── 限额与开关 ──
 MAX_UPLOAD_BYTES = int(os.environ.get("LL_MAX_UPLOAD_MB", "100")) * 1024 * 1024
+MAX_AUDIO_TRANSCODE_BYTES = 300 * 1024 * 1024
 MAX_JSON_BYTES = 5 * 1024 * 1024
 MAX_TTS_SENTENCES = 600
 MAX_TTS_SENTENCE_LEN = 1000
@@ -537,15 +538,18 @@ class Handler(BaseHTTPRequestHandler):
         if not path.is_file():
             self._send_json(404, {"error": "录制文件已过期或不存在"})
             return
-        body = path.read_bytes()
+        size = path.stat().st_size
+        self.connection.settimeout(300)
+        self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(size))
         title = urllib.parse.quote(rec.get("title") or "recording.lecture.zip")
         self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{title}")
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(body)
+            with path.open("rb") as src:
+                shutil.copyfileobj(src, self.wfile, length=64 * 1024)
 
     def _handle_favorite(self, rec_id):
         uid = self._session_uid()
@@ -729,15 +733,18 @@ class Handler(BaseHTTPRequestHandler):
             path = SHARED_DIR / rec["stored"]
         if not path.is_file():
             return self._send(404, b"Not Found", "text/plain")
-        body = path.read_bytes()
+        size = path.stat().st_size
+        self.connection.settimeout(300)
+        self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(size))
         title = urllib.parse.quote(rec.get("title") or "recording.lecture.zip")
         self.send_header("Content-Disposition", f"inline; filename*=UTF-8''{title}")
         self.end_headers()
         if self.command != "HEAD":
-            self.wfile.write(body)
+            with path.open("rb") as src:
+                shutil.copyfileobj(src, self.wfile, length=64 * 1024)
 
     # ── 播放进度（用户级，不写入录制包）──
     def _handle_progress(self):
@@ -758,6 +765,138 @@ class Handler(BaseHTTPRequestHandler):
             _db["user_progress"].setdefault(uid, {})[rid] = {"pos_ms": pos, "updated": int(time.time())}
             _save_store()
         self._send_json(200, {"success": True})
+
+    def _handle_ppt_convert(self):
+        """Convert an uploaded PowerPoint file to PDF for the existing PDF renderer."""
+        if not self._session_uid():
+            return self._send_json(401, {"error": "未登录"})
+        soffice = shutil.which("libreoffice") or shutil.which("soffice")
+        if not soffice:
+            return self._send_json(503, {"error": "服务器尚未安装 LibreOffice"})
+        if not _heavy_lock.acquire(blocking=False):
+            return self._send_json(429, {"error": "服务器繁忙，请稍后再试"})
+        tmp_path = None
+        work_dir = None
+        try:
+            ctype = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in ctype:
+                return self._send_json(400, {"error": "需要 multipart/form-data"})
+            boundary = self._get_boundary(ctype)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not boundary or length <= 0:
+                return self._send_json(400, {"error": "上传内容为空"})
+            if length > MAX_UPLOAD_BYTES:
+                return self._send_json(413, {"error": f"文件过大（上限 {MAX_UPLOAD_BYTES // (1024*1024)}MB）"})
+            self.connection.settimeout(120)
+            SHARED_DIR.mkdir(exist_ok=True)
+            filename, tmp_path, _, remaining, complete = self._stream_multipart_file(length, boundary)
+            if not filename or not tmp_path or remaining > 0 or not complete:
+                return self._send_json(400, {"error": "PPT 上传不完整"})
+            suffix = Path(filename).suffix.lower()
+            if suffix not in (".ppt", ".pptx"):
+                return self._send_json(415, {"error": "仅支持 .ppt 和 .pptx"})
+            work_dir = Path(tempfile.mkdtemp(prefix="lecturelite-ppt-"))
+            src = work_dir / ("source" + suffix)
+            os.replace(tmp_path, src)
+            tmp_path = None
+            profile = (work_dir / "profile").resolve().as_uri()
+            result = subprocess.run(
+                [soffice, f"-env:UserInstallation={profile}", "--headless",
+                 "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(work_dir), str(src)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120, check=False
+            )
+            pdf_path = work_dir / "source.pdf"
+            if result.returncode != 0 or not pdf_path.is_file():
+                detail = result.stdout.decode("utf-8", "replace").strip()[-500:]
+                return self._send_json(422, {"error": "PPT 转换失败" + (("：" + detail) if detail else "")})
+            self.connection.settimeout(300)
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(pdf_path.stat().st_size))
+            self.send_header("Content-Disposition", "inline; filename=converted.pdf")
+            self.end_headers()
+            if self.command != "HEAD":
+                with pdf_path.open("rb") as src_file:
+                    shutil.copyfileobj(src_file, self.wfile, length=64 * 1024)
+        except subprocess.TimeoutExpired:
+            self._send_json(504, {"error": "PPT 转换超时"})
+        finally:
+            if tmp_path:
+                try:
+                    Path(tmp_path).unlink()
+                except OSError:
+                    pass
+            if work_dir:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            _heavy_lock.release()
+
+    def _handle_audio_compress(self):
+        """Transcode generated PCM WAV audio to a compact, speech-focused MP3."""
+        if not self._session_uid():
+            return self._send_json(401, {"error": "未登录"})
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return self._send_json(503, {"error": "服务器尚未安装 FFmpeg"})
+        if not _heavy_lock.acquire(blocking=False):
+            return self._send_json(429, {"error": "服务器繁忙，请稍后再试"})
+        tmp_path = None
+        work_dir = None
+        try:
+            ctype = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in ctype:
+                return self._send_json(400, {"error": "需要 multipart/form-data"})
+            boundary = self._get_boundary(ctype)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not boundary or length <= 0:
+                return self._send_json(400, {"error": "音频上传内容为空"})
+            if length > MAX_AUDIO_TRANSCODE_BYTES:
+                return self._send_json(413, {"error": "待压缩音频超过 300MB"})
+            self.connection.settimeout(300)
+            SHARED_DIR.mkdir(exist_ok=True)
+            filename, tmp_path, _, remaining, complete = self._stream_multipart_file(length, boundary)
+            if not filename or not tmp_path or remaining > 0 or not complete:
+                return self._send_json(400, {"error": "音频上传不完整"})
+            work_dir = Path(tempfile.mkdtemp(prefix="lecturelite-audio-"))
+            src = work_dir / "source.wav"
+            out = work_dir / "speech.mp3"
+            os.replace(tmp_path, src)
+            tmp_path = None
+            result = subprocess.run(
+                [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                 "-i", str(src), "-vn", "-ac", "1", "-ar", "16000",
+                 "-c:a", "libmp3lame", "-b:a", "24k", "-map_metadata", "-1", str(out)],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180, check=False
+            )
+            if result.returncode != 0 or not out.is_file():
+                detail = result.stdout.decode("utf-8", "replace").strip()[-500:]
+                return self._send_json(422, {"error": "音频压缩失败" + (("：" + detail) if detail else "")})
+            self.connection.settimeout(300)
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(out.stat().st_size))
+            self.send_header("Content-Disposition", "inline; filename=speech.mp3")
+            self.end_headers()
+            with out.open("rb") as audio_file:
+                shutil.copyfileobj(audio_file, self.wfile, length=64 * 1024)
+        except subprocess.TimeoutExpired:
+            self._send_json(504, {"error": "音频压缩超时"})
+        finally:
+            if tmp_path:
+                try:
+                    Path(tmp_path).unlink()
+                except OSError:
+                    pass
+            if work_dir:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            _heavy_lock.release()
 
     def do_GET(self):
         path = urllib.parse.unquote(self.path.split("?")[0])
@@ -819,7 +958,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
-        known = ("/api/register", "/api/login", "/api/logout",
+        known = ("/api/register", "/api/login", "/api/logout", "/api/convert-ppt", "/api/compress-audio",
                  "/api/upload", "/share", "/api/progress",
                  "/generate-script", "/generate-script-stream",
                  "/generate-script-timeline", "/generate-speech-stream")
@@ -832,6 +971,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_login()
         if path == "/api/logout":
             return self._handle_logout()
+        if path == "/api/convert-ppt":
+            return self._handle_ppt_convert()
+        if path == "/api/compress-audio":
+            return self._handle_audio_compress()
         if path == "/api/upload" or path == "/share":
             return self._handle_upload()
         if path == "/api/progress":

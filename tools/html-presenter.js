@@ -57,18 +57,53 @@ window.LectureHTML = (() => {
       baseline = nodes.map(n => attrs.map(k => n.getAttribute(k)));
       ready = true;
       const slides = [...document.querySelectorAll('.slide')].map(n=>n.textContent);
+      // 为自动语音讲解提供可指向的页内文本块。坐标归一化后由宿主直接写入光标时间轴。
+      const slideNodes = [...document.querySelectorAll('.slide')];
+      const targets = [];
+      for (let slide = 0; slide < slideNodes.length; slide++) {
+        const root = slideNodes[slide];
+        for (const n of root.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,button,.kicker,.step,.quote,.chip,.chip2,.card,.name')) {
+          const text = (n.innerText || n.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+          const r = n.getBoundingClientRect();
+          if (!text || r.width < 2 || r.height < 2) continue;
+          targets.push({slide,text,x:r.left/innerWidth,y:r.top/innerHeight,w:r.width/innerWidth,h:r.height/innerHeight});
+          if (targets.length >= 600) break;
+        }
+        if (targets.length >= 600) break;
+      }
       const copy = document.body.cloneNode(true);
       copy.querySelectorAll('script,style').forEach(n=>n.remove());
-      send('ready',{text:copy.textContent.slice(0,200000),slides});
+      send('ready',{text:copy.textContent.slice(0,200000),slides,targets});
       emit();
       setInterval(emit,200);
     });
     document.addEventListener('pointermove', e => { if(!playback) send('pointer',{x:e.clientX/innerWidth,y:e.clientY/innerHeight}); }, {passive:true});
     document.addEventListener('pointerdown', e => { if(!playback) send('click',{x:e.clientX/innerWidth,y:e.clientY/innerHeight}); }, {passive:true});
-    // Playback is driven by the saved timeline; do not let embedded shortcuts diverge.
-    for (const name of ['click','keydown','wheel','touchstart']) document.addEventListener(name,e => {
-      if(playback){ e.preventDefault(); e.stopImmediatePropagation(); }
-    },true);
+    document.addEventListener('pointerup', e => {
+      if (playback || e.button !== 0) return;
+      const selection = getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      const rects = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+      const quote = selection.toString().trim().slice(0, 500);
+      if (!quote || !rects.length) return;
+      const slides = [...document.querySelectorAll('.slide')];
+      const slide = slides.findIndex(n => n.classList.contains('active'));
+      send('selection', {
+        quote,
+        x: e.clientX / innerWidth,
+        y: e.clientY / innerHeight,
+        coords: rects.map(r => ({
+          slide,
+          x: r.left / innerWidth,
+          y: r.top / innerHeight,
+          w: r.width / innerWidth,
+          h: r.height / innerHeight
+        }))
+      });
+    }, {passive:true});
+    // 回放时仍保留 HTML 自身的交互：目录、主题、编辑、页内按钮和滚动均可用。
+    // playback 只关闭状态/光标反向上报，避免听众操作污染已录制的时间轴。
   }
   async function mount(host, html, imageMap, onEvent) {
     const channel = crypto.randomUUID();
@@ -88,13 +123,14 @@ window.LectureHTML = (() => {
     const frame = document.createElement('iframe');
     frame.title = 'HTML 演示文稿'; frame.setAttribute('sandbox','allow-scripts');
     frame.className = 'html-presentation'; frame.referrerPolicy = 'no-referrer';
-    let resolveReady, resolveCapture;
+    let resolveReady, resolveCapture, currentState = null;
     const pending = new Promise(r=>resolveReady=r);
     const listener = e=>{
       if(e.source !== frame.contentWindow || e.data?.lectureHTML !== channel) return;
-      if(!['ready','state','pointer','click','captured'].includes(e.data.kind)) return;
+      if(!['ready','state','pointer','click','selection','captured'].includes(e.data.kind)) return;
       if(e.data.value == null || JSON.stringify(e.data.value).length > 500000) return;
       if(e.data.kind === 'captured'){resolveCapture?.(e.data.value);resolveCapture=null;return;}
+      if(e.data.kind === 'state') currentState = e.data.value;
       if(e.data.kind === 'ready') {
         if(typeof e.data.value.text !== 'string' || !Array.isArray(e.data.value.slides)) return;
         resolveReady(e.data.value);
@@ -104,12 +140,15 @@ window.LectureHTML = (() => {
     window.addEventListener('message',listener);
     frame.srcdoc = '<!doctype html>'+parsed.documentElement.outerHTML;
     host.replaceChildren(frame);
-    const send = (kind,value)=>frame.contentWindow?.postMessage({lectureHTML:channel,kind,value},'*');
+    const send = (kind,value)=>{
+      if (kind === 'restore' && value) currentState = value;
+      frame.contentWindow?.postMessage({lectureHTML:channel,kind,value},'*');
+    };
     let timeout;
     const info = await Promise.race([pending,new Promise(r=>timeout=setTimeout(()=>r({text:parsed.body.textContent,slides:0}),6000))]);
     clearTimeout(timeout);
     const capture = ()=>new Promise(resolve=>{const timer=setTimeout(()=>{resolveCapture=null;resolve(null);},1500);resolveCapture=value=>{clearTimeout(timer);resolve(value);};send('capture');});
-    return {frame,info,send,capture,destroy(){resolveCapture?.(null);window.removeEventListener('message',listener);frame.remove();}};
+    return {frame,info,send,capture,state:()=>currentState,destroy(){resolveCapture?.(null);window.removeEventListener('message',listener);frame.remove();}};
   }
   return {mount};
 })();

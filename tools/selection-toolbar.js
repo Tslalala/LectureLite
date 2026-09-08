@@ -149,6 +149,19 @@
       this.showToolbar(descriptor.rect, clientX, clientY);
     }
 
+    offerExternalSelection(descriptor, rect, clientX, clientY) {
+      if (this.options.getMode() !== "rec" || !descriptor || !descriptor.quote
+          || !Array.isArray(descriptor.coords) || !descriptor.coords.length || !rect) return;
+      this.selection = {
+        fi: this.options.getFileIndex(),
+        sourceType: descriptor.sourceType || this.options.getSourceType(),
+        quote: String(descriptor.quote).trim().slice(0, 500),
+        coords: descriptor.coords.map(item => ({ ...item }))
+      };
+      if (!this.selection.quote) return;
+      this.showToolbar(rect, clientX, clientY);
+    }
+
     readSelection() {
       if (this.options.getMode() !== "rec") return null;
       const selection = window.getSelection();
@@ -407,7 +420,11 @@
       const visible = this.annotations.filter(item => item.fi === fi
         && (time == null || item.t <= time)
         && (item.removedAt == null || (time != null && time < item.removedAt)));
+      const htmlSlide = sourceType === "html" && this.options.getHtmlSlide
+        ? this.options.getHtmlSlide()
+        : -1;
       const key = (readonly ? "play" : "rec") + "|" + fi + "|" + sourceType + "|"
+        + htmlSlide + "|"
         + (time == null ? "all" : visible.map(item => item.id || [item.t, item.type].join("-")).join(","));
       if (key === this.renderKey && this.layer && this.doc.contains(this.layer)) return;
       this.renderKey = key;
@@ -429,7 +446,9 @@
     renderAnnotation(annotation, sourceType) {
       const rects = sourceType === "md"
         ? this.markdownRects(annotation)
-        : this.pdfRects(annotation);
+        : sourceType === "html"
+          ? this.htmlRects(annotation)
+          : this.pdfRects(annotation);
       if (!rects.length) return;
       const tool = window.LectureLiteToolRegistry.get(annotation.type);
       const renderer = tool && tool.render;
@@ -604,6 +623,21 @@
           height: coord.h * pageRect.height
         };
       }).filter(Boolean);
+    }
+
+    htmlRects(annotation) {
+      if (!Array.isArray(annotation.coords)) return [];
+      const frame = this.doc.querySelector("iframe.html-presentation");
+      if (!frame) return [];
+      const docRect = this.doc.getBoundingClientRect();
+      const frameRect = frame.getBoundingClientRect();
+      const currentSlide = this.options.getHtmlSlide ? this.options.getHtmlSlide() : -1;
+      return annotation.coords.filter(coord => coord.slide == null || coord.slide === currentSlide).map(coord => ({
+        left: frameRect.left - docRect.left + coord.x * frameRect.width,
+        top: frameRect.top - docRect.top + coord.y * frameRect.height,
+        width: coord.w * frameRect.width,
+        height: coord.h * frameRect.height
+      }));
     }
 
     // 悬停标注才出现的删除小按钮（×），替代原来"点击即删"的隐式逻辑

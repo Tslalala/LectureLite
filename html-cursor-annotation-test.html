@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LectureLite HTML 交互测试</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,"Microsoft YaHei",sans-serif;background:#f6f4ef;color:#171717}
+  .slide{display:none;min-height:100vh;padding:9vh 10vw}.slide.active{display:block}
+  h1{font-size:52px;margin:0 0 28px}.lead{font-size:28px;line-height:1.8;max-width:920px}
+  .target{display:inline;padding:4px 8px;background:#fff1a8;border-radius:6px}
+  .actions{margin-top:44px;display:flex;gap:16px}button{font-size:20px;padding:12px 22px;border:1px solid #bbb;border-radius:10px;background:white;cursor:pointer}
+  #counter{position:fixed;right:28px;bottom:22px;color:#666}.note{margin-top:40px;font-size:20px;color:#666}
+</style>
+</head>
+<body>
+<section class="slide active">
+  <h1>HTML 光标与批注测试</h1>
+  <p class="lead">请移动鼠标经过这一段文字，点击白色按钮，然后选择这句文字：<span class="target">LectureLite 应该记录光标，并允许添加高亮或批注。</span></p>
+  <div class="actions"><button id="clickTest">点击测试</button><button class="toc-item" data-i="1">下一页</button></div>
+  <p id="result" class="note">按钮尚未点击</p>
+</section>
+<section class="slide">
+  <h1>第二页状态测试</h1>
+  <p class="lead">如果回放时自动来到这里，说明 HTML 页面状态已经进入时间轴。</p>
+  <div class="actions"><button class="toc-item" data-i="0">返回第一页</button></div>
+</section>
+<div id="counter">1 / 2</div>
+<script>
+  const slides=[...document.querySelectorAll('.slide')], counter=document.getElementById('counter');
+  function show(i){slides.forEach((s,n)=>s.classList.toggle('active',n===i));counter.textContent=(i+1)+' / '+slides.length;}
+  document.addEventListener('click',e=>{const b=e.target.closest('.toc-item');if(b)show(Number(b.dataset.i));});
+  document.getElementById('clickTest').onclick=()=>{document.getElementById('result').textContent='按钮已点击，时间 '+new Date().toLocaleTimeString();};
+</script>
+</body>
+</html>

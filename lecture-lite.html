@@ -6,6 +6,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' blob: https://cdn.jsdelivr.net; frame-src blob:; object-src 'none'; base-uri 'none'">
 <title>LectureLite — 文件 + 音频 + 操作时间轴</title>
 <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <link rel="stylesheet" href="tools/annotations.css">
@@ -367,7 +368,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 </head>
 <body>
 <header>
-  <h1 class="brand"><img src="docs/logo.png" alt="LectureLite" class="wordmark"><small>文件 + 音频 + 操作时间轴</small></h1>
+  <h1 class="brand"><img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark"><small>文件 + 音频 + 操作时间轴</small></h1>
   <button id="modeRec" class="primary">录制</button>
   <button id="modePlay">播放</button>
   <button id="helpBtn" title="帮助">?</button>
@@ -379,7 +380,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
   <button id="toolbarToggle" title="收起工具栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
   <div class="bar on" id="recBar">
     <span class="src-group">
-      <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,.html,.htm,image/*" multiple style="display:none">
+      <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,.ppt,.pptx,.html,.htm,image/*" multiple style="display:none">
       <input type="file" id="srcDir" webkitdirectory style="display:none">
       <button id="srcFileBtn" class="src-btn">添加文档</button>
       <button id="srcDirBtn" class="src-btn">添加文件夹</button>
@@ -401,7 +402,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
   </div>
   <div class="bar" id="playBar">
     <input type="file" id="zipPick" accept=".zip">
-    <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,.html,.htm,image/*" multiple class="hidden">
+    <input type="file" id="srcPick2" accept=".md,.markdown,.txt,.pdf,.ppt,.pptx,.html,.htm,image/*" multiple class="hidden">
     <button id="btnPlay" disabled>播放</button>
     <button id="btnSharePlay" disabled title="保存一份到自己的主页，随后可在主页管理分享">保存副本到主页</button>
     <button id="btnFav" class="hidden" disabled title="收藏当前课程，可在主页查看">☆ 收藏</button>
@@ -481,7 +482,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 
 <div id="authGate">
   <div class="card">
-    <img src="docs/logo.png" alt="LectureLite" class="wordmark-lg">
+    <img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark-lg">
     <p class="sub">登录后可保存录制、查看分享与收藏课程</p>
     <div id="authTabs">
       <button id="tabLogin" class="on">登录</button>
@@ -499,7 +500,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 </div>
 
 <div id="intro"><div class="card" onclick="event.stopPropagation()">
-  <img src="docs/logo.png" alt="LectureLite" class="wordmark-lg">
+  <img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark-lg">
   <p style="color:var(--dim);font-size:13px;margin:0 0 4px">源文件 + 你的声音 + 操作时间轴，不用录屏。</p>
   <ol>
     <li><b>录制</b>：把 <code>.md</code> / <code>.pdf</code> / 文件夹<b>拖进页面</b>，或用上方按钮选择；点工作区 <b>+</b> 可继续加文件。顶部工具栏可<b>收起</b>（悬停顶部临时展开）。</li>
@@ -538,6 +539,81 @@ function status(msg, isErr){
   const el = $('status');
   el.textContent = msg || '';
   el.classList.toggle('err', !!isErr);
+}
+function formatBytes(bytes){
+  const mb = Math.max(0, Number(bytes) || 0) / 1048576;
+  return mb < 0.1 ? Math.round((Number(bytes) || 0) / 1024) + ' KB' : mb.toFixed(1) + ' MB';
+}
+function transferStatus(label, loaded, total){
+  const amount = formatBytes(loaded) + (total > 0 ? ' / ' + formatBytes(total) : '');
+  const percent = total > 0 ? ' ' + Math.min(100, Math.round(loaded / total * 100)) + '%' : '';
+  status(label + percent + '（' + amount + '）');
+}
+function uploadFormJSON(url, form, label){
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.responseType = 'json';
+    xhr.upload.onprogress = event => transferStatus(label, event.loaded, event.lengthComputable ? event.total : 0);
+    xhr.onerror = () => reject(new Error('网络连接失败'));
+    xhr.onabort = () => reject(new Error('上传已取消'));
+    xhr.onload = () => {
+      const data = xhr.response || {};
+      if(xhr.status < 200 || xhr.status >= 300) reject(new Error(data.error || ('服务器返回 ' + xhr.status)));
+      else resolve(data);
+    };
+    xhr.send(form);
+  });
+}
+function uploadFormBlob(url, form, label){
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.responseType = 'blob';
+    xhr.upload.onprogress = event => transferStatus(label, event.loaded, event.lengthComputable ? event.total : 0);
+    xhr.upload.onload = () => status('服务器正在压缩语音…');
+    xhr.onerror = () => reject(new Error('网络连接失败'));
+    xhr.onabort = () => reject(new Error('上传已取消'));
+    xhr.onload = async () => {
+      if(xhr.status < 200 || xhr.status >= 300){
+        let message = '服务器返回 ' + xhr.status;
+        try { const data = JSON.parse(await xhr.response.text()); if(data.error) message = data.error; } catch(e){}
+        reject(new Error(message));
+      } else resolve(xhr.response);
+    };
+    xhr.send(form);
+  });
+}
+async function compressGeneratedAudio(wavBlob){
+  const form = new FormData();
+  form.append('file', new File([wavBlob], 'speech.wav', {type:'audio/wav'}));
+  status('正在压缩语音…');
+  return uploadFormBlob('/api/compress-audio', form, '正在上传音频进行压缩…');
+}
+async function fetchBlobWithProgress(url, label){
+  const res = await fetch(url);
+  if(!res.ok){
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || ('HTTP ' + res.status));
+  }
+  const total = Number(res.headers.get('Content-Length')) || 0;
+  if(!res.body || !res.body.getReader){
+    const blob = await res.blob();
+    transferStatus(label, blob.size, total || blob.size);
+    return blob;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  while(true){
+    const part = await reader.read();
+    if(part.done) break;
+    chunks.push(part.value);
+    loaded += part.value.byteLength;
+    transferStatus(label, loaded, total);
+  }
+  transferStatus(label, loaded, total || loaded);
+  return new Blob(chunks, {type:res.headers.get('Content-Type') || 'application/octet-stream'});
 }
 // 录制计时同时写进度条内计时器与收起模式下的行内徽标
 function renderRecIndicator(html){
@@ -699,9 +775,29 @@ function makeEntry(f, imgs){
 }
 function splitFileList(list){
   return {
-    docs: list.filter(f => /\.(md|markdown|txt|pdf|html|htm)$/i.test(f.name)),
+    docs: list.filter(f => /\.(md|markdown|txt|pdf|ppt|pptx|html|htm)$/i.test(f.name)),
     imgs: list.filter(f => f.type && f.type.startsWith('image/'))
   };
+}
+async function convertPresentationFile(file){
+  status('正在将 ' + file.name + ' 转换为 PDF…');
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const res = await fetch('/api/convert-ppt', {method:'POST', body:form});
+  if(!res.ok){
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || ('PPT 转换失败（HTTP ' + res.status + '）'));
+  }
+  const blob = await res.blob();
+  const pdfName = file.name.replace(/\.pptx?$/i, '') + '.pdf';
+  return new File([blob], pdfName, {type:'application/pdf', lastModified:file.lastModified});
+}
+async function preparePresentationFiles(list){
+  const prepared = [];
+  for(const file of list){
+    prepared.push(/\.pptx?$/i.test(file.name) ? await convertPresentationFile(file) : file);
+  }
+  return prepared;
 }
 // 全新加载前清空录制状态与标注（换一组新源文件）
 async function resetWorkspaceForNewSources(){
@@ -722,6 +818,8 @@ async function resetWorkspaceForNewSources(){
 async function ingestFiles(list, opts){
   opts = opts || {};
   if (!list.length) return;
+  try { list = await preparePresentationFiles(list); }
+  catch(err){ status(err.message, true); return; }
   // 单个 zip：直接切播放模式加载
   if (list.length === 1 && /\.zip$/i.test(list[0].name)){
     setMode('play');
@@ -729,7 +827,7 @@ async function ingestFiles(list, opts){
     return;
   }
   const { docs, imgs } = splitFileList(list);
-  if (!docs.length){ status('未找到可加载的 MD、PDF 或 HTML 文件', true); return; }
+  if (!docs.length){ status('未找到可加载的 MD、PDF、PPT 或 HTML 文件', true); return; }
   if (mode === 'play'){ status('播放模式下拖入 lecture.zip 才能打开；加载文档请先切到「录制」'); return; }
 
   const multi = docs.length > 1 || imgs.length > 0;
@@ -923,14 +1021,36 @@ async function renderSource(entry){
         entry._htmlState = value;
         if(recState && !recState.finished && recState.st0)
           htmlTimeline.push({t:Math.round(performance.now()-recState.st0),fi:currentFileIndex,state:value});
+        if(annotationTools){ annotationTools.renderKey = ''; renderAnnotations(); }
       }
       if((kind === 'pointer' || kind === 'click') && recState && !recState.finished && Number.isFinite(value?.x) && Number.isFinite(value?.y)){
         const point = {t:Math.round(performance.now()-recState.st0),x:Math.max(0,Math.min(1,value.x)),y:Math.max(0,Math.min(1,value.y))};
         (kind === 'click' ? recState.clicks : recState.cursor).push(point);
       }
+      if(kind === 'selection' && mode === 'rec' && annotationTools && Array.isArray(value?.coords) && value.coords.length){
+        const frame = htmlPresenter?.frame;
+        const frameRect = frame?.getBoundingClientRect();
+        if(frameRect){
+          const first = value.coords[0];
+          const rect = {
+            left: frameRect.left + first.x * frameRect.width,
+            top: frameRect.top + first.y * frameRect.height,
+            width: first.w * frameRect.width,
+            height: first.h * frameRect.height,
+            right: frameRect.left + (first.x + first.w) * frameRect.width,
+            bottom: frameRect.top + (first.y + first.h) * frameRect.height
+          };
+          annotationTools.offerExternalSelection(
+            {sourceType:'html',quote:value.quote,coords:value.coords}, rect,
+            frameRect.left + value.x * frameRect.width,
+            frameRect.top + value.y * frameRect.height
+          );
+        }
+      }
     });
     source.text = htmlPresenter.info.text;
     source.slides = htmlPresenter.info.slides;
+    source.htmlTargets = Array.isArray(htmlPresenter.info.targets) ? htmlPresenter.info.targets : [];
     contentEl = htmlPresenter.frame;
     htmlPresenter.send('mode', mode === 'play');
     if(previousState && mode === 'rec'){ htmlPresenter.send('restore',previousState); htmlPresenter.send('mode',false); }
@@ -960,6 +1080,10 @@ async function renderSource(entry){
       if (imgMap[base]) imgEl.src = imgMap[base];
     });
     doc.appendChild(div);
+    if (window.MathJax?.typesetPromise) {
+      try { await MathJax.typesetPromise([div]); }
+      catch (err) { console.warn("MathJax typesetting failed", err); }
+    }
     contentEl = div;
     source = { name, blob, type, text, imgFiles: imgFiles || [], imgMap };
   } else {
@@ -1166,7 +1290,7 @@ if (tabBar){
     if (!tabAddInput) {
       tabAddInput = document.createElement('input');
       tabAddInput.type = 'file';
-      tabAddInput.accept = '.md,.markdown,.txt,.pdf,.html,.htm,image/*';
+      tabAddInput.accept = '.md,.markdown,.txt,.pdf,.ppt,.pptx,.html,.htm,image/*';
       tabAddInput.multiple = true;
       tabAddInput.style.display = 'none';
       document.body.appendChild(tabAddInput);
@@ -1306,7 +1430,7 @@ async function startRec(){
     if (annotationTools) annotationTools.setAnnotations(annotations);
   }
   const mime = pickAudioMime();
-  const rec = withAudio ? new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined) : null;
+  const rec = withAudio ? new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 16000 } : undefined) : null;
   const chunks = [];
   if(rec) rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   const states = [], cursor = [], clicks = [], fileSwitches = [];
@@ -1319,14 +1443,14 @@ async function startRec(){
   const onMove = throttle(e => {
     const cr = getContentRect();
     // 存相对内容元素的比例 (0~1), 确保跨屏幕/缩放一致
-    const rx = cr.width > 0 ? (e.clientX - cr.left) / cr.width : 0;
-    const ry = cr.height > 0 ? (e.clientY - cr.top) / cr.height : 0;
+    const rx = cr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - cr.left) / cr.width)) : 0;
+    const ry = cr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - cr.top) / cr.height)) : 0;
     cursor.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
   }, 40);
   const onDown = e => {
     const cr = getContentRect();
-    const rx = cr.width > 0 ? (e.clientX - cr.left) / cr.width : 0;
-    const ry = cr.height > 0 ? (e.clientY - cr.top) / cr.height : 0;
+    const rx = cr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - cr.left) / cr.width)) : 0;
+    const ry = cr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - cr.top) / cr.height)) : 0;
     clicks.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
   };
   function curSel(){
@@ -1352,8 +1476,12 @@ async function startRec(){
   const onScroll = throttle(pushState, 80);
   pushState();
   viewer.addEventListener('scroll', onScroll);
-  viewer.addEventListener('pointermove', onMove);
-  viewer.addEventListener('pointerdown', onDown);
+  // HTML iframe 里的坐标由注入的 bridge 精确上报。如果同时监听外层 viewer，
+  // 鼠标从工具栏移入 iframe 时会产生相对 iframe 的负坐标，回放光标就会跑到画面外。
+  if (source.type !== 'html') {
+    viewer.addEventListener('pointermove', onMove);
+    viewer.addEventListener('pointerdown', onDown);
+  }
   document.addEventListener('selectionchange', onScroll);
   const iv = setInterval(pushState, 250);
 
@@ -1466,12 +1594,7 @@ async function doShare(zipBlob, fileName, linkInputId, wrapId){
   try {
     const fd = new FormData();
     fd.append('file', new File([zipBlob], fileName, { type: 'application/zip' }));
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      throw new Error(d.error || ('服务器返回 ' + res.status));
-    }
-    const data = await res.json();
+    const data = await uploadFormJSON('/api/upload', fd, '正在上传到分享服务器…');
     if (recState?.finished) recState.saved = true;
     if (data.rec_id) setCurrentRec(data.rec_id, false);   // 上传成功后可在播放栏收藏
     $(linkInputId).value = '';
@@ -2023,6 +2146,8 @@ function applyCursor(t){
   const cs = play.cursor;
   const el = $('cursor');
   if (!cs.length){ el.style.display = 'none'; return; }
+  // 第一个采样点之前不做反向外推，否则光标会被算到画面外。
+  if (t < cs[0].t){ el.style.display = 'none'; return; }
   let i = upperBound(cs, t) - 1;
   if (i < 0) i = 0;
   const p = cs[i], next = cs[i + 1];
@@ -2535,7 +2660,7 @@ async function recordSpeech(){
   const mime = pickAudioMime();
   const audioTracks = audioStream.getAudioTracks();
   const audioOnlyStream = new MediaStream(audioTracks);
-  const rec = new MediaRecorder(audioOnlyStream, mime ? { mimeType: mime, audioBitsPerSecond: 96000 } : undefined);
+  const rec = new MediaRecorder(audioOnlyStream, mime ? { mimeType: mime, audioBitsPerSecond: 16000 } : undefined);
   const audioChunks = [];
   rec.ondataavailable = e => { if (e.data && e.data.size) audioChunks.push(e.data); };
   const st0 = performance.now();
@@ -2737,17 +2862,68 @@ function encodeWavBlob(samples, sampleRate){
 // LLM 规划的 op（highlight/underline/strike/comment）在对应时间点自动创建为标注。
 function buildOfflineStates(dursMs, gapMs){
   if(source?.type === 'html'){
-    let elapsed = 0, page = 0;
+    const cursor = [], clicks = [], newAnnotations = [], popupEvents = [];
+    const posArr = [], tArr = [], targets = Array.isArray(source.htmlTargets) ? source.htmlTargets : [];
+    const norm = value => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu,'');
+    let elapsed = 0, page = 0, prevPos = null;
+    for (let i = annotations.length - 1; i >= 0; i--){
+      if (typeof annotations[i].id === 'string' && annotations[i].id.indexOf('ann-gen-') === 0) annotations.splice(i, 1);
+    }
     htmlTimeline = scriptTimeline.map((item,i)=>{
-      const needle = (item.anchor || item.op?.target || item.text || '').replace(/\s/g,'').replace(/[。！？]$/,'');
-      const found = needle && Array.isArray(source.slides) ? source.slides.findIndex(text=>text.replace(/\s/g,'').includes(needle)) : -1;
+      const needles = [item.op?.target,item.anchor,item.text].map(norm).filter(Boolean);
+      const found = needles.length && Array.isArray(source.slides)
+        ? source.slides.findIndex(text=>needles.some(needle=>norm(text).includes(needle))) : -1;
       if(found >= 0) page = found;
-      item.startMs = elapsed; item.endMs = elapsed + dursMs[i];
-      const row = {t:Math.round(elapsed),fi:currentFileIndex,state:{slide:page}};
-      elapsed += dursMs[i] + gapMs;
+      const startT = Math.round(elapsed), endT = startT + Math.round(dursMs[i]);
+      item.startMs = startT; item.endMs = endT;
+
+      // 在当前页找与 anchor / 标注目标 / 讲解句最接近的可见文本块。
+      let best = null, bestScore = -1;
+      for (const target of targets){
+        if (target.slide !== page) continue;
+        const tt = norm(target.text);
+        if (!tt) continue;
+        for (const needle of needles){
+          let score = -1;
+          if (tt === needle) score = 100000 + tt.length;
+          else if (tt.includes(needle)) score = 70000 + needle.length * 10 - (tt.length - needle.length);
+          else if (needle.includes(tt) && tt.length >= 2) score = 50000 + tt.length * 10;
+          if (score > bestScore){ bestScore = score; best = target; }
+        }
+      }
+      let pos = prevPos;
+      if (best){
+        pos = {x:Math.max(0,Math.min(1,best.x + best.w * .5)),y:Math.max(0,Math.min(1,best.y + best.h * .65))};
+      } else if (!pos) {
+        // 找不到精确文字时仍给出稳定的页面指引，避免整段讲解没有光标。
+        pos = {x:.5,y:.45};
+      }
+      posArr[i] = pos; tArr[i] = [startT,endT];
+      if (pos) clicks.push({t:startT,x:pos.x,y:pos.y});
+      prevPos = pos;
+
+      const op = item.op;
+      if (op && op.kind && op.kind !== 'none' && best){
+        const annotation = {
+          id:'ann-gen-'+i+'-'+Date.now().toString(36), t:startT+400, type:op.kind,
+          fi:typeof currentFileIndex === 'number' ? currentFileIndex : 0,
+          quote:best.text.slice(0,500), coords:[{slide:page,x:best.x,y:best.y,w:best.w,h:best.h}]
+        };
+        if (op.kind === 'comment') annotation.text = op.text || '';
+        annotations.push(annotation); newAnnotations.push(annotation);
+        if (op.kind === 'comment' && annotation.text){
+          popupEvents.push({t:annotation.t+600,id:annotation.id,fi:annotation.fi,open:true});
+          popupEvents.push({t:endT+300,id:annotation.id,fi:annotation.fi,open:false});
+        }
+      }
+      const row = {t:startT,fi:currentFileIndex,state:{slide:page}};
+      elapsed = endT + gapMs;
       return row;
     });
-    return {states:[{t:0,sr:0,y:0,s:null}],cursor:[],clicks:[],fileSwitches:[{t:0,fi:currentFileIndex}],newAnnotations:[],popupEvents:[],totalDurMs:Math.max(0,elapsed-gapMs)};
+    emitCursorTimeline(cursor,posArr,tArr,gapMs);
+    if (annotationTools) annotationTools.setAnnotations(annotations);
+    renderAnnotations();
+    return {states:[{t:0,sr:0,y:0,s:null}],cursor,clicks,fileSwitches:[{t:0,fi:currentFileIndex}],newAnnotations,popupEvents,totalDurMs:Math.max(0,elapsed-gapMs)};
   }
   const states = [], cursor = [], clicks = [], fileSwitches = [];
   if (currentFileIndex >= 0) fileSwitches.push({ t: 0, fi: currentFileIndex });
@@ -3017,7 +3193,14 @@ async function generateSpeech(){
 
       // 每句时长包含思考停顿，时间轴（光标/滚动/字幕）与音频对齐
       dursMs = parts.map((p, i) => (p ? p.length / sr * 1000 : 400) + ((scriptTimeline[i] && scriptTimeline[i].pause) || 0));
-      audioBlob = encodeWavBlob(mixed, sr);
+      const wavBlob = encodeWavBlob(mixed, sr);
+      try {
+        audioBlob = await compressGeneratedAudio(wavBlob);
+      } catch(err) {
+        console.warn('Generated audio compression failed; keeping WAV fallback', err);
+        audioBlob = wavBlob;
+        status('语音压缩失败，已保留 WAV：' + err.message, true);
+      }
     } else {
       // 未勾选「语音」：不合成音频，按字数估算时长（含停顿），生成纯时间轴包
       dursMs = scriptTimeline.map(s => Math.max(400, s.text.length * 280) + (s.pause || 0));
@@ -3088,6 +3271,7 @@ if (window.LectureLiteAnnotationTools){
     getMode: () => mode,
     getFileIndex: () => currentFileIndex,
     getSourceType: () => source ? source.type : '',
+    getHtmlSlide: () => htmlPresenter?.state()?.slide ?? -1,
     getTimestamp: () => recState && !recState.finished && recState.st0
       ? performance.now() - recState.st0
       : 0,
@@ -3220,12 +3404,7 @@ window.addEventListener('pagehide', reportProgress);
 async function openRecording(id, title, fav){
   status('正在加载录制…');
   try {
-    const res = await fetch('/api/recordings/' + id + '/file');
-    if (!res.ok){
-      const d = await res.json().catch(() => ({}));
-      throw new Error(d.error || ('HTTP ' + res.status));
-    }
-    const blob = await res.blob();
+    const blob = await fetchBlobWithProgress('/api/recordings/' + id + '/file', '正在加载录制…');
     setMode('play');
     await loadZip(new File([blob], title || 'recording.lecture.zip', { type: 'application/zip' }));
     setCurrentRec(id, fav);
@@ -3253,9 +3432,8 @@ refreshMe();
   const posMs = parseInt(params.get('pos') || '0', 10);
   if (posMs > 0) window.__pendingSeekMs = posMs;
   setMode('play');
-  status('正在加载: ' + srcDecoded + ' …');
-  fetch(srcDecoded)
-    .then(res => { if (!res.ok) throw new Error('HTTP ' + res.status); return res.blob(); })
+  status('正在加载分享课程…');
+  fetchBlobWithProgress(srcDecoded, '正在加载分享课程…')
     .then(blob => {
       const f = new File([blob], srcDecoded, { type: 'application/zip' });
       loadZip(f);
