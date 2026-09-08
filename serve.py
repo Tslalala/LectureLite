@@ -677,7 +677,7 @@ class Handler(BaseHTTPRequestHandler):
             if days > 0:
                 _db["share_links"][sid]["expires_at"] = int(time.time() + days * 86400)
                 _save_store()
-        url = f"{URL_SCHEME}://{LAN_IP}:{self.server.server_address[1]}/s/{sid}?tk={token}"
+        url = f"{PUBLIC_BASE_URL}/s/{sid}?tk={token}"
         self._send_json(200, {"success": True, "sid": sid, "url": url})
 
     def _handle_link_revoke(self, sid):
@@ -946,7 +946,7 @@ class Handler(BaseHTTPRequestHandler):
         os.replace(tmp_path, SHARED_DIR / stored_name)
 
         rec_id = _add_recording(uid, safe_name, stored_name)
-        url = f"{URL_SCHEME}://{LAN_IP}:{self.server.server_address[1]}/api/recordings/{rec_id}/file"
+        url = f"{PUBLIC_BASE_URL}/api/recordings/{rec_id}/file"
 
         self._send_json(200, {"url": url, "id": rec_id, "rec_id": rec_id, "size": size})
         # 结束边界后若还有字节，不复用连接，避免残留字节被解释成下一次 HTTP 请求。
@@ -1240,6 +1240,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 URL_SCHEME = "https"
+PUBLIC_BASE_URL = "https://47.109.104.139:8663"
 
 
 def ensure_self_signed_cert():
