@@ -31,7 +31,7 @@
   --acc:#1a1a1a; --acc2:#3a3a3a;
   --rec:#c4423a;
   /* 字幕：默认透明度 0.72（比原 0.88 更低），默认字号 16px（比原 14.5px 大一号） */
-  --cc-alpha:.72; --cc-fs:16px;
+  --cc-alpha:.72; --cc-fs:16px; --cc-lines:2;
 }
 *{ box-sizing:border-box; }
 html,body{ height:100%; }
@@ -301,7 +301,24 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #ccSettings label{ display:flex; align-items:center; gap:8px; font-size:11px; color:#c9c9c3; white-space:nowrap; }
 #ccSettings input[type=range]{ flex:1; height:3px; accent-color:#e8362f; cursor:pointer; }
 #ccSettings .cc-val{ min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
-#ccText{ margin-top:5px; font-size:var(--cc-fs); line-height:1.6; pointer-events:none; }
+#ccText{ margin-top:5px; font-size:var(--cc-fs); line-height:1.6; pointer-events:none; white-space:pre-line;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:var(--cc-lines); overflow:hidden; }
+#ccSettings select{ flex:1; min-width:104px; padding:4px 7px; border-radius:6px;
+  border:1px solid rgba(255,255,255,.18); background:#292926; color:#f4f4ef; font-size:11px; }
+#ccTranscript{ flex:0 0 360px; width:360px; min-width:0; display:flex; flex-direction:column;
+  background:#fbfbf9; border-left:1px solid var(--line); overflow:hidden;
+  transition:flex-basis .24s ease,width .24s ease,opacity .18s ease; }
+#ccTranscript.hidden{ display:none; }
+#ccTranscriptHead{ display:flex; align-items:center; justify-content:space-between; padding:13px 14px;
+  border-bottom:1px solid var(--line); font-size:14px; }
+#ccTranscriptHead button{ padding:4px 8px; }
+#ccTranscriptBody{ flex:1; overflow:auto; padding:10px 12px; scroll-behavior:smooth; }
+.cc-transcript-row{ display:grid; grid-template-columns:42px 1fr; gap:9px; padding:9px 8px;
+  border-radius:8px; color:var(--dim); cursor:pointer; font-size:13px; line-height:1.55;
+  transition:background .15s,color .15s; }
+.cc-transcript-row:hover{ background:var(--surface2); color:var(--fg); }
+.cc-transcript-row.active{ background:#f1e8e5; color:var(--fg); }
+.cc-transcript-time{ font-size:11px; color:var(--dim2); padding-top:2px; font-variant-numeric:tabular-nums; }
 #ccBtn{ font-weight:700; letter-spacing:.5px; }
 #ccBtn.off{ opacity:.4; }
 @keyframes ccFade{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
@@ -444,9 +461,12 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
         <div id="ccSettings" class="hidden">
           <label>透明度<input type="range" id="ccOpacity" min="20" max="100" step="5"><span class="cc-val" id="ccOpacityVal"></span></label>
           <label>字号<input type="range" id="ccFontSize" min="12" max="28" step="1"><span class="cc-val" id="ccFontSizeVal"></span></label>
+          <label>显示行数<select id="ccLines"><option value="1">1 行</option><option value="2">2 行</option><option value="3">3 行</option><option value="4">4 行</option></select></label>
+          <label>显示位置<select id="ccMode"><option value="bottom">底部字幕</option><option value="side">侧边完整讲稿</option></select></label>
         </div>
         <div id="ccText"></div>
       </div>
+      <aside id="ccTranscript" class="hidden" aria-label="完整讲稿"><div id="ccTranscriptHead"><strong>完整讲稿</strong><button id="ccTranscriptClose" title="关闭侧边讲稿">×</button></div><div id="ccTranscriptBody"></div></aside>
     </div>
     <div id="scriptPanel" class="hidden">
       <div id="scriptPanel-header">
@@ -1843,6 +1863,7 @@ function setupSubtitle(json){
   btn.disabled = !hasScript;
   if (!hasScript){
     $('ccBar').classList.add('hidden');
+    $('ccTranscript').classList.add('hidden');
     $('ccText').textContent = '';
     return;
   }
@@ -1855,14 +1876,16 @@ function applyCcState(on){
   const btn = $('ccBtn'), bar = $('ccBar');
   btn.classList.toggle('off', !on);
   bar.classList.toggle('hidden', !on);
+  const side = loadCcStyle().mode === 'side';
+  $('ccTranscript').classList.toggle('hidden', !on || !side);
 }
 
 // —— 字幕外观（透明度/字号），持久化到 localStorage ——
-const CC_DEFAULTS = { opacity: 72, fontSize: 16 };
+const CC_DEFAULTS = { opacity: 72, fontSize: 16, lines: 2, mode: 'bottom' };
 function loadCcStyle(){
   try {
     const s = JSON.parse(localStorage.getItem('ccStyle') || 'null');
-    if (s && typeof s.opacity === 'number' && typeof s.fontSize === 'number') return s;
+    if (s && typeof s.opacity === 'number' && typeof s.fontSize === 'number') return { ...CC_DEFAULTS, ...s };
   } catch(e){}
   return { ...CC_DEFAULTS };
 }
@@ -1870,13 +1893,24 @@ function applyCcStyle(){
   const s = loadCcStyle();
   const op = Math.max(20, Math.min(100, Math.round(s.opacity)));
   const fs = Math.max(12, Math.min(28, Math.round(s.fontSize)));
+  const lines = Math.max(1, Math.min(4, Math.round(s.lines || 2)));
+  const side = s.mode === 'side';
   document.documentElement.style.setProperty('--cc-alpha', (op / 100).toFixed(2));
   document.documentElement.style.setProperty('--cc-fs', fs + 'px');
+  document.documentElement.style.setProperty('--cc-lines', lines);
   $('ccOpacity').value = op;  $('ccOpacityVal').textContent = op + '%';
   $('ccFontSize').value = fs; $('ccFontSizeVal').textContent = fs + 'px';
+  $('ccLines').value = String(lines);
+  $('ccMode').value = side ? 'side' : 'bottom';
+  $('ccBar').classList.toggle('side-mode', side);
+  $('ccTranscript').classList.toggle('hidden', !side || $('ccBtn').classList.contains('off'));
 }
 applyCcStyle();
-$('ccGear').addEventListener('click', () => $('ccSettings').classList.toggle('hidden'));
+$('ccGear').addEventListener('click', e => { e.stopPropagation(); $('ccSettings').classList.toggle('hidden'); });
+document.addEventListener('pointerdown', e => {
+  const settings = $('ccSettings');
+  if (!settings.classList.contains('hidden') && !$('ccBar').contains(e.target)) settings.classList.add('hidden');
+});
 $('ccOpacity').addEventListener('input', e => {
   const s = loadCcStyle(); s.opacity = parseInt(e.target.value, 10);
   localStorage.setItem('ccStyle', JSON.stringify(s));
@@ -1887,6 +1921,22 @@ $('ccFontSize').addEventListener('input', e => {
   localStorage.setItem('ccStyle', JSON.stringify(s));
   applyCcStyle();
 });
+$('ccLines').addEventListener('change', e => { const s=loadCcStyle(); s.lines=Number(e.target.value); localStorage.setItem('ccStyle',JSON.stringify(s)); applyCcStyle(); });
+$('ccMode').addEventListener('change', e => { const s=loadCcStyle(); s.mode=e.target.value; localStorage.setItem('ccStyle',JSON.stringify(s)); applyCcStyle(); renderTranscript(); });
+$('ccTranscriptClose').addEventListener('click', () => { const s=loadCcStyle(); s.mode='bottom'; localStorage.setItem('ccStyle',JSON.stringify(s)); applyCcStyle(); });
+
+function renderTranscript(){
+  const body=$('ccTranscriptBody');
+  if(!play?.script?.length){ body.replaceChildren(); return; }
+  const escCc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  body.innerHTML=play.script.map((row,i)=>'<div class="cc-transcript-row'+(i===ccSentenceIdx?' active':'')+'" data-i="'+i+'"><span class="cc-transcript-time">'+fmtTime((row.startMs||0)/1000)+'</span><span>'+escCc(row.text||'')+'</span></div>').join('');
+  body.querySelectorAll('[data-i]').forEach(el=>el.addEventListener('click',()=>{
+    const ms=Number(play.script[Number(el.dataset.i)].startMs)||0;
+    $('seek').value=String(Math.round(ms/10));
+    $('seek').dispatchEvent(new Event('input',{bubbles:true}));
+  }));
+  body.querySelector('.active')?.scrollIntoView({block:'nearest'});
+}
 
 function updateSubtitle(tMs){
   if (!play || !play.script || !play.script.length) return;
@@ -1899,7 +1949,9 @@ function updateSubtitle(tMs){
   el.style.animation = 'none';
   void el.offsetWidth;
   el.style.animation = 'ccFade .25s ease-out';
-  el.textContent = play.script[i].text || '';
+  const lines=Math.max(1,Number(loadCcStyle().lines)||2);
+  el.textContent = play.script.slice(Math.max(0,i-lines+1),i+1).map(x=>x.text||'').join('\n');
+  renderTranscript();
 }
 
 $('ccBtn').addEventListener('click', () => {
