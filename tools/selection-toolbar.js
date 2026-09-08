@@ -125,7 +125,16 @@
           this.hide();
         }
       };
-      this.onScroll = () => this.hide();
+      this.layoutFrame = 0;
+      this.refreshLayout = () => {
+        if (this.layoutFrame) return;
+        this.layoutFrame = requestAnimationFrame(() => {
+          this.layoutFrame = 0;
+          this.renderKey = "";
+          this.render(this.options.getPlaybackTime());
+        });
+      };
+      this.onScroll = () => { this.hide(); this.refreshLayout(); };
       this.onResize = () => {
         this.hide();
         this.renderKey = "";
@@ -137,6 +146,9 @@
       document.addEventListener("pointerdown", this.onOutsidePointerDown, true);
       this.viewer.addEventListener("scroll", this.onScroll, { passive: true });
       window.addEventListener("resize", this.onResize);
+      this.resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(this.refreshLayout) : null;
+      this.resizeObserver?.observe(this.viewer);
+      this.resizeObserver?.observe(this.doc);
     }
 
     offerForSelection(clientX, clientY) {
@@ -632,12 +644,22 @@
       const docRect = this.doc.getBoundingClientRect();
       const frameRect = frame.getBoundingClientRect();
       const currentSlide = this.options.getHtmlSlide ? this.options.getHtmlSlide() : -1;
-      return annotation.coords.filter(coord => coord.slide == null || coord.slide === currentSlide).map(coord => ({
-        left: frameRect.left - docRect.left + coord.x * frameRect.width,
-        top: frameRect.top - docRect.top + coord.y * frameRect.height,
-        width: coord.w * frameRect.width,
-        height: coord.h * frameRect.height
-      }));
+      const state = this.options.getHtmlState ? this.options.getHtmlState() : null;
+      return annotation.coords.filter(coord => coord.slide == null || coord.slide === currentSlide).map(coord => {
+        const currentX = Number(state?.x) || 0, currentY = Number(state?.y) || 0;
+        const currentW = Number(state?.vw) || Number(coord.vw) || frameRect.width;
+        const currentH = Number(state?.vh) || Number(coord.vh) || frameRect.height;
+        const recordedX = Number(coord.sx) || 0, recordedY = Number(coord.sy) || 0;
+        const recordedW = Number(coord.vw) || currentW, recordedH = Number(coord.vh) || currentH;
+        const x = Number.isFinite(coord.sx) ? (coord.x * recordedW + recordedX - currentX) / currentW : coord.x;
+        const y = Number.isFinite(coord.sy) ? (coord.y * recordedH + recordedY - currentY) / currentH : coord.y;
+        return {
+          left: frameRect.left - docRect.left + x * frameRect.width,
+          top: frameRect.top - docRect.top + y * frameRect.height,
+          width: coord.w * recordedW / currentW * frameRect.width,
+          height: coord.h * recordedH / currentH * frameRect.height
+        };
+      });
     }
 
     // 悬停标注才出现的删除小按钮（×），替代原来"点击即删"的隐式逻辑

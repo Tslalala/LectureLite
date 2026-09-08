@@ -9,6 +9,7 @@ window.LectureHTML = (() => {
     let nodes = [], baseline = [], playback = false, last = '', ready = false;
     const attrs = ['class','style','hidden','open'];
     const send = (kind, value) => parent.postMessage({lectureHTML:channel,kind,value}, '*');
+    const sendViewport = () => send('viewport',{x:scrollX,y:scrollY,vw:innerWidth,vh:innerHeight,slide:[...document.querySelectorAll('.slide')].findIndex(n=>n.classList.contains('active'))});
     function snapshot() {
       return {slide:[...document.querySelectorAll('.slide')].findIndex(n=>n.classList.contains('active')),nodes:nodes.map((n,i) => {
         const a = attrs.map(k => n.getAttribute(k));
@@ -16,7 +17,7 @@ window.LectureHTML = (() => {
         const scroll = n.scrollTop || n.scrollLeft;
         const text = n.id === 'counter' ? n.textContent : undefined;
         return changed || scroll || text ? {i,a,y:n.scrollTop,x:n.scrollLeft,text} : null;
-      }).filter(Boolean), x:scrollX,y:scrollY};
+      }).filter(Boolean), x:scrollX,y:scrollY,vw:innerWidth,vh:innerHeight};
     }
     function emit() {
       if (!ready || playback) return;
@@ -74,9 +75,12 @@ window.LectureHTML = (() => {
       const copy = document.body.cloneNode(true);
       copy.querySelectorAll('script,style').forEach(n=>n.remove());
       send('ready',{text:copy.textContent.slice(0,200000),slides,targets});
+      sendViewport();
       emit();
       setInterval(emit,200);
     });
+    window.addEventListener('scroll',sendViewport,{passive:true});
+    window.addEventListener('resize',sendViewport,{passive:true});
     document.addEventListener('pointermove', e => { if(!playback) send('pointer',{x:e.clientX/innerWidth,y:e.clientY/innerHeight}); }, {passive:true});
     document.addEventListener('pointerdown', e => { if(!playback) send('click',{x:e.clientX/innerWidth,y:e.clientY/innerHeight}); }, {passive:true});
     document.addEventListener('pointerup', e => {
@@ -98,7 +102,11 @@ window.LectureHTML = (() => {
           x: r.left / innerWidth,
           y: r.top / innerHeight,
           w: r.width / innerWidth,
-          h: r.height / innerHeight
+          h: r.height / innerHeight,
+          sx: scrollX,
+          sy: scrollY,
+          vw: innerWidth,
+          vh: innerHeight
         }))
       });
     }, {passive:true});
@@ -127,10 +135,11 @@ window.LectureHTML = (() => {
     const pending = new Promise(r=>resolveReady=r);
     const listener = e=>{
       if(e.source !== frame.contentWindow || e.data?.lectureHTML !== channel) return;
-      if(!['ready','state','pointer','click','selection','captured'].includes(e.data.kind)) return;
+      if(!['ready','state','viewport','pointer','click','selection','captured'].includes(e.data.kind)) return;
       if(e.data.value == null || JSON.stringify(e.data.value).length > 500000) return;
       if(e.data.kind === 'captured'){resolveCapture?.(e.data.value);resolveCapture=null;return;}
       if(e.data.kind === 'state') currentState = e.data.value;
+      if(e.data.kind === 'viewport') currentState = {...(currentState||{}),...e.data.value};
       if(e.data.kind === 'ready') {
         if(typeof e.data.value.text !== 'string' || !Array.isArray(e.data.value.slides)) return;
         resolveReady(e.data.value);

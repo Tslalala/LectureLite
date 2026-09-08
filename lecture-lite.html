@@ -1020,6 +1020,10 @@ async function renderSource(entry){
     const previousState = entry._htmlState;
     source = {name,blob,type,text:'',imgFiles};
     htmlPresenter = await LectureHTML.mount(doc, html, imgMap, (kind,value) => {
+      if (kind === 'viewport'){
+        entry._htmlState = {...(entry._htmlState || {}), ...value};
+        if(annotationTools){ annotationTools.renderKey = ''; renderAnnotations(); }
+      }
       if (kind === 'state'){
         entry._htmlState = value;
         if(recState && !recState.finished && recState.st0)
@@ -1934,6 +1938,8 @@ $('btnPlay').addEventListener('click', () => {
   }
 });
 $('seek').addEventListener('input', async e => {
+  const seekMax = Math.max(1, Number(e.currentTarget.max) || 1);
+  e.currentTarget.style.setProperty('--seek-progress', (Math.max(0, Math.min(1, Number(e.currentTarget.value) / seekMax)) * 100).toFixed(3) + '%');
   if (!play) return;
   const t = e.target.value / 100;
   if (play.hasAudio){
@@ -2202,6 +2208,7 @@ function tick(){
     interactionUI?.tick(t);
     const smax = parseFloat($('seek').max) || 1;
     $('seek').value = Math.min(Math.round(t / 10), smax);
+    $('seek').style.setProperty('--seek-progress', (Math.max(0, Math.min(1, Number($('seek').value) / smax)) * 100).toFixed(3) + '%');
     const dur = play.dur || 0;
     $('time').textContent = fmtTime(t / 1000) + ' / ' + fmtTime(dur);
   }
@@ -3281,6 +3288,7 @@ if (window.LectureLiteAnnotationTools){
     getFileIndex: () => currentFileIndex,
     getSourceType: () => source ? source.type : '',
     getHtmlSlide: () => htmlPresenter?.state()?.slide ?? -1,
+    getHtmlState: () => htmlPresenter?.state() || null,
     getTimestamp: () => recState && !recState.finished && recState.st0
       ? performance.now() - recState.st0
       : 0,
@@ -3331,6 +3339,10 @@ function apiJSON(url, opts){
   });
 }
 function showAuth(on){ $('authGate').classList.toggle('show', on); }
+function isPublicShareView(){
+  const src = new URLSearchParams(location.search).get('src') || '';
+  return /^\/api\/link\/[a-zA-Z0-9_-]+\/file(?:\?|$)/.test(src);
+}
 function updateFavBtn(){
   const b = $('btnFav');
   const usable = !!(me && currentRecId);
@@ -3345,7 +3357,7 @@ async function refreshMe(){
   $('userChip').classList.toggle('hidden', !me);
   $('logoutBtn').classList.toggle('hidden', !me);
   if (me) $('userChip').textContent = me;
-  showAuth(!me);
+  showAuth(!me && !isPublicShareView());
 }
 let authMode = 'login';
 function setAuthMode(m){
