@@ -3525,11 +3525,12 @@ let workflowText = '';
 function refreshWorkflow(){
   const busy = (recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript;
   const text = busy ? ((generatingSpeech || generatingScript) ? '正在生成 · 请等待完成，随后可预览、下载或保存到主页。' : '正在录制 · 点击「停止」完成，再预览、下载或保存到主页。')
-    : mode === 'play' ? (play ? '播放课程 · 空格暂停 / 继续，拖动进度定位；收藏后可在主页再次打开。' : '打开讲解包 · 选择 lecture.zip，或从主页打开已保存的课程。')
+    : mode === 'play' ? (play ? '' : '打开讲解包 · 选择 lecture.zip，或从主页打开已保存的课程。')
     : recState?.finished ? '录制已完成 · 下载讲解包用于离线分发，或保存到主页后分享。'
     : source ? (source.type === 'html' ? 'HTML 演示 · 用演示内的目录、翻页按钮操作；开始录制后记录翻页与滚动。' : '文档已就绪 · 开始录制你的声音，或用 AI 生成讲稿。选中文字即可标注。')
     : '第 1 步 · 添加文档　→　第 2 步 · 录制讲解 / AI 生成　→　第 3 步 · 下载或保存';
   if(text !== workflowText){ $('workflowHint').textContent = workflowText = text; }
+  $('workflowHint').classList.toggle('hidden', !text);
   $('btnAutoScript').disabled = !source || !!busy;
   for(const id of ['btnExport','btnPreview','btnShare']) $(id).classList.toggle('hidden',!recState?.finished);
   for(const id of ['btnAutoScript','btnWriteScript']) $(id).classList.toggle('hidden',!source);
