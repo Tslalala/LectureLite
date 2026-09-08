@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <link rel="stylesheet" href="tools/annotations.css">
 <link rel="stylesheet" href="tools/interactions.css">
+<link rel="stylesheet" href="tools/ui-refine.css">
 <script src="tools/tool-registry.js"></script>
 <script src="tools/highlight.js"></script>
 <script src="tools/underline.js"></script>
@@ -21,6 +22,7 @@
 <script src="tools/selection-toolbar.js"></script>
 <script src="tools/html-presenter.js"></script>
 <script src="tools/interactions.js"></script>
+<script src="tools/ui-refine.js"></script>
 <style>
 :root{
   --bg:#FAFAF8; --surface:#FFFFFF; --surface2:#F4F4F1;
@@ -387,8 +389,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
       <button id="srcFileBtn" class="src-btn">添加文档</button>
       <button id="srcDirBtn" class="src-btn">添加文件夹</button>
     </span>
-    <label><input type="checkbox" id="embedSrc" checked>打包源文件</label>
-    <label title="取消后只记录翻页、滚动和标注，不使用麦克风"><input id="recordAudio" type="checkbox" checked>录制声音</label>
+    <details class="ui-settings"><summary>更多设置</summary><div class="ui-settings-panel"><label><span>打包源文件</span><input type="checkbox" id="embedSrc" checked></label><label title="取消后只记录翻页、滚动和标注，不使用麦克风"><span>录制声音</span><input id="recordAudio" type="checkbox" checked></label></div></details>
     <button id="btnStart" class="primary" disabled>开始录制</button>
     <button id="btnStop" disabled>停止</button>
     <button id="btnExport" disabled>下载讲解包</button>
@@ -630,7 +631,8 @@ const headerEl = document.querySelector('header');
   if (!toggle) return;
   function apply(c){
     headerEl.classList.toggle('collapsed', c);
-    toggle.title = c ? '展开工具栏（悬停顶部可临时展开）' : '收起工具栏';
+    toggle.title = c ? '展开工具栏' : '收起工具栏';
+    toggle.setAttribute('aria-expanded', String(!c));
   }
   toggle.addEventListener('click', () => {
     const c = !headerEl.classList.contains('collapsed');
@@ -804,7 +806,7 @@ async function preparePresentationFiles(list){
 }
 // 全新加载前清空录制状态与标注（换一组新源文件）
 async function resetWorkspaceForNewSources(){
-  if(recState?.finished && !confirm('替换文档会清空当前录制结果。确认已经下载或保存到主页了吗？')) return false;
+  if(recState?.finished && !await LectureUI.confirm('替换文档会清空当前录制结果。请先确认已经下载或保存到主页。',{title:'替换当前文档？',confirmText:'继续替换',danger:true})) return false;
   if ((recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript) {
     status('录制或生成进行中，不能替换工作区', true);
     return false;
@@ -1423,7 +1425,7 @@ async function startRec(){
   const withAudio = $('recordAudio').checked;
   if (withAudio && (!window.MediaRecorder || !navigator.mediaDevices)){ status('此浏览器不支持录音，可取消「录制声音」只记录操作', true); return; }
   if (!md && source.type === 'md'){ status('markdown-it 未加载', true); return; }
-  if(recState?.finished && !recState.saved && !confirm('当前讲解尚未保存，重新录制会替换它。继续吗？'))return;
+  if(recState?.finished && !recState.saved && !await LectureUI.confirm('当前讲解尚未保存，重新录制会覆盖现有结果。',{title:'重新录制？',confirmText:'覆盖并录制',danger:true}))return;
   let stream = null;
   try { if(withAudio) stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch (err){ status('麦克风不可用：' + err.message, true); return; }
@@ -3277,7 +3279,7 @@ function showHelp(){ $('intro').classList.add('show'); }
 function hideHelp(){ $('intro').classList.remove('show'); }
 $('helpBtn').addEventListener('click', showHelp);
 $('introOk').addEventListener('click', hideHelp);
-$('intro').addEventListener('click', hideHelp); // 点遮罩关闭
+$('intro').addEventListener('click', e => { if(e.target === $('intro')) hideHelp(); });
 
 /* ---------- contextual annotation tools ---------- */
 if (window.LectureLiteAnnotationTools){

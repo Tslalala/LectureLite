@@ -142,8 +142,10 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
 @media(max-width:680px){.metric-grid{grid-template-columns:1fr}.feedback-card{width:96vw;max-height:92vh}}
 </style>
 <link rel="stylesheet" href="tools/home.css">
+<link rel="stylesheet" href="tools/ui-refine.css">
 </head>
 <body>
+<script src="tools/ui-refine.js"></script>
 <header>
   <div class="brand"><img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark"><small>个人课程库</small></div>
   <span class="spacer"></span>
@@ -257,7 +259,7 @@ async function toggleFav(it){
   } catch(err){ status('收藏失败：' + err.message); }
 }
 async function deleteRec(it){
-  if (!confirm('把「' + (it.title || '未命名') + '」移入回收站？\n30 天内可恢复，到期自动清空。')) return;
+  if (!await LectureUI.confirm('“' + (it.title || '未命名') + '”将移入回收站，30 天内可以恢复。',{title:'移入回收站？',confirmText:'移入回收站'})) return;
   try {
     await apiJSON('/api/recordings/' + it.id + '/delete', { method: 'POST' });
     status('已移入回收站（30 天内可恢复）');
@@ -272,7 +274,7 @@ async function restoreRec(it){
   } catch(err){ status('恢复失败：' + err.message); }
 }
 async function purgeRec(it){
-  if (!confirm('彻底删除「' + (it.title || '未命名') + '」？此操作无法撤销。')) return;
+  if (!await LectureUI.confirm('“' + (it.title || '未命名') + '”及其学习数据将被永久删除，此操作无法撤销。',{title:'彻底删除课程？',confirmText:'彻底删除',danger:true})) return;
   try {
     await apiJSON('/api/recordings/' + it.id + '/purge', { method: 'POST' });
     status('已彻底删除');
@@ -319,7 +321,7 @@ function renderItem(it, opts){
   const li = el('li', 'card');
   const row = el('div', 'row');
   // 播放按钮
-  const play = el('button', 'play-dot', '▶');
+  const play = el('button', 'play-dot'); play.innerHTML = LectureUI.svg('chevron');
   play.title = '播放';
   play.addEventListener('click', () => openUrl(it));
   row.appendChild(play);
@@ -344,7 +346,7 @@ function renderItem(it, opts){
   row.appendChild(grow);
 
   // 收藏星（示例课程锁定为已收藏）
-  const star = el('button', 'star' + (it.favorite ? ' on' : ''), it.favorite ? '★' : '☆');
+  const star = el('button', 'star' + (it.favorite ? ' on' : '')); star.innerHTML = LectureUI.svg('star'); star.setAttribute('aria-pressed',String(!!it.favorite));
   star.title = it.demo ? '示例课程默认收藏' : (it.favorite ? '取消收藏' : '收藏');
   if (it.demo){ star.disabled = true; }
   else star.addEventListener('click', () => toggleFav(it));
