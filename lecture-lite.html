@@ -10,8 +10,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <link rel="stylesheet" href="tools/annotations.css">
-<link rel="stylesheet" href="tools/interactions.css">
-<link rel="stylesheet" href="tools/ui-refine.css">
+<link rel="stylesheet" href="tools/interactions.css?v=20260908g">
+<link rel="stylesheet" href="tools/ui-refine.css?v=20260908j">
 <script src="tools/tool-registry.js"></script>
 <script src="tools/highlight.js"></script>
 <script src="tools/underline.js"></script>
@@ -21,7 +21,7 @@
 <script src="tools/sticker.js"></script>
 <script src="tools/selection-toolbar.js"></script>
 <script src="tools/html-presenter.js"></script>
-<script src="tools/interactions.js"></script>
+<script src="tools/interactions.js?v=20260908i"></script>
 <script src="tools/ui-refine.js"></script>
 <style>
 :root{
@@ -121,6 +121,29 @@ header.collapsed.recording #recBadge{ display:inline-flex; }
 .bar{ display:none; flex-wrap:wrap; gap:10px; align-items:center; width:100%;
   padding-top:12px; margin-top:2px; border-top:1px solid var(--line); }
 .bar.on{ display:flex; }
+.rec-tools{gap:8px 10px!important;align-items:stretch!important}
+.rec-tool-section{position:relative;display:flex;align-items:center;gap:6px;min-width:0;padding:0 10px 0 0;margin-right:2px}
+.rec-tool-section:not(:last-child)::after{content:"";position:absolute;right:0;top:5px;bottom:5px;width:1px;background:var(--line)}
+.rec-tool-section-label{font-size:11px;line-height:1;color:var(--dim2);letter-spacing:.06em;white-space:nowrap;margin-right:2px}
+.rec-source-section{flex:0 1 auto}.rec-session-section{flex:0 0 auto}.rec-create-section{flex:0 1 auto}.rec-result-section{flex:1 1 auto;justify-content:flex-end;padding-right:0;margin-right:0}
+.rec-result-section::after{display:none}
+.rec-tools button{height:32px;white-space:nowrap}
+.rec-tools .src-group{height:32px}
+.rec-tools .ui-settings{height:32px}
+#btnStart{min-width:104px;background:var(--fg);border-color:var(--fg);color:#fff;font-weight:650}
+#btnStart:hover:not(:disabled){background:#333;border-color:#333}
+#btnStop{min-width:88px;background:var(--rec);border-color:var(--rec);color:#fff;font-weight:650}
+#btnStop:disabled{display:none}
+#recTimer{display:inline-flex;align-items:center;min-width:52px;font-variant-numeric:tabular-nums;font-size:12.5px!important;color:var(--dim)!important}
+.rec-tools.is-recording .rec-source-section,.rec-tools.is-recording .rec-create-section,.rec-tools.is-recording .rec-result-section{opacity:.42;pointer-events:none}
+.rec-tools.is-recording .rec-session-section{padding:3px 12px;border-radius:10px;background:rgba(196,66,58,.055)}
+.rec-tools.is-ready #btnStart{background:var(--surface);border-color:var(--line);color:var(--dim);min-width:auto}
+.rec-tools.is-ready .rec-result-section{padding:3px 4px 3px 10px;border-radius:10px;background:var(--surface2)}
+.rec-tools.is-ready #btnPreview{background:var(--fg);border-color:var(--fg);color:#fff}
+.rec-tools:not(.has-source) .rec-create-section,.rec-tools:not(.has-source) .rec-result-section{opacity:.38}
+#interactionActionHost{display:inline-flex;align-items:center}
+@media(max-width:1250px){.rec-result-section{justify-content:flex-start;flex-basis:100%;padding:8px 0 0;border-top:1px solid var(--line)}.rec-tool-section:nth-last-child(2)::after{display:none}}
+@media(max-width:820px){.rec-tool-section{flex-basis:100%;padding:5px 0;margin:0;border-bottom:1px solid var(--line);overflow-x:auto}.rec-tool-section::after{display:none!important}.rec-result-section{border-top:0}.rec-tool-section-label{position:sticky;left:0;background:var(--surface);padding-right:6px;z-index:1}}
 .hidden{ display:none !important; }
 
 /* —— stage: 撑满剩余高度 —— */
@@ -155,6 +178,8 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 
 /* —— 工作区主体：目录 + 文档 —— */
 #workarea{ flex:1; display:flex; min-height:0; position:relative; }
+#workarea{overflow:hidden;isolation:isolate;background:var(--surface)}
+#workarea::before{content:"";position:absolute;inset:-28px;z-index:-1;background:var(--workspace-wallpaper,none) center/cover no-repeat;opacity:var(--workspace-wallpaper-opacity,0);filter:blur(var(--workspace-wallpaper-blur,0));transform:scale(1.03);pointer-events:none}
 /* 空状态引导（未加载任何文件时） */
 #emptyState{ position:absolute; inset:0; z-index:3; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:4px; text-align:center;
@@ -173,10 +198,18 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #tocCollapse{ border:0; background:none; cursor:pointer; color:var(--dim2); font-size:13px;
   line-height:1; padding:2px 4px; border-radius:4px; }
 #tocCollapse:hover{ color:var(--fg); background:rgba(0,0,0,.06); }
-#toc.collapsed{ width:40px; padding:14px 6px; }
+#toc.collapsed{ width:40px!important; min-width:40px!important; flex-basis:40px!important; padding:14px 6px; }
 #toc.collapsed #toc-title{ display:none; }
 #toc.collapsed #tocCollapse{ transform:scaleX(-1); }
 #toc.collapsed .toc-row, #toc.collapsed .toc-empty, #toc.collapsed .toc-branch{ display:none; }
+.side-resizer{ position:relative; flex:0 0 8px; width:8px; cursor:ew-resize; z-index:16; touch-action:none; background:transparent; }
+.side-resizer::before{ content:''; position:absolute; left:3px; top:0; bottom:0; width:1px; background:transparent; transition:background .15s; }
+.side-resizer::after{ content:'↔'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) scale(.86); display:flex; align-items:center; justify-content:center; width:27px; height:25px; border:1px solid var(--line); border-radius:8px; background:#faf8f3; color:var(--dim2); font-size:12px; opacity:0; box-shadow:0 3px 10px rgba(0,0,0,.07); transition:opacity .15s,transform .15s; pointer-events:none; }
+.side-resizer:hover::before,.side-resizer.dragging::before{ background:#c9a8a4; }
+.side-resizer:hover::after,.side-resizer.dragging::after{ opacity:1; transform:translate(-50%,-50%) scale(1); }
+#toc.collapsed + #tocResize{ display:none; }
+@media(max-width:760px){ .side-resizer,.ll-side-resize{ display:none!important; } }
+@media(max-width:760px){ #headerHint{ display:none!important; } }
 #toc .toc-empty{ color:var(--dim2); font-size:12px; padding:8px 6px; }
 #toc .toc-row{ display:flex; align-items:center; gap:2px; padding:3px 4px; color:var(--dim);
   cursor:pointer; line-height:1.5; border-radius:4px; }
@@ -195,7 +228,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #toc .toc-branch.folded > .toc-row .toc-fold svg{ transform:rotate(0deg); }
 #toc .toc-branch.folded > .toc-branch{ display:none; }
 
-#viewer{ flex:1; overflow:auto; background:#fff;
+#viewer{ flex:1; overflow:auto; background:rgba(255,255,255,var(--workspace-paper-alpha,1));
   border-radius:0 0 12px 0; position:relative;
   border:1px solid var(--line); border-top:none; }
 #viewer::-webkit-scrollbar{ width:10px; height:10px; }
@@ -204,7 +237,7 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #viewer::-webkit-scrollbar-thumb:hover{ background:rgba(0,0,0,.22); }
 
 #doc{ position:relative; min-height:100%; }
-.md-content{ max-width:820px; margin:0 auto; padding:40px 48px 120px;
+.md-content{ max-width:820px; margin:0 auto; padding:40px 48px 120px;background:rgba(255,255,255,var(--workspace-document-alpha,0));backdrop-filter:blur(var(--workspace-glass-blur,0));
   color:#1f1f1d; font-size:15.5px; line-height:1.75; }
 .md-content h1,.md-content h2,.md-content h3{ line-height:1.3; font-weight:600; letter-spacing:-.01em; }
 .md-content pre{ background:var(--surface2); border:1px solid var(--line);
@@ -218,10 +251,11 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 .md-content img{ max-width:100%; }
 .md-content a{ color:var(--fg); text-decoration:underline; text-underline-offset:2px; text-decoration-color:var(--line2); }
 
-.pdf-page{ position:relative; margin:0 auto 12px; }
-.pdf-page canvas{ display:block; }
-.pdf-page .textLayer{ position:absolute; inset:0; overflow:hidden; }
-.pdf-page .textLayer span{ color:transparent; }
+.pdf-document{padding:22px 18px 110px}.pdf-page{ position:relative; margin:0 auto 18px;background:#fff;border:1px solid rgba(35,35,30,.10);box-shadow:0 5px 20px rgba(28,28,24,.08);border-radius:3px;overflow:hidden }
+.pdf-page canvas{ display:block;max-width:100%;height:auto }
+.pdf-page .textLayer{ position:absolute; inset:0; overflow:hidden;line-height:1;text-size-adjust:none;transform-origin:0 0 }
+.pdf-page .textLayer span,.pdf-page .textLayer br{ position:absolute;color:transparent;white-space:pre;transform-origin:0 0;cursor:text }
+.pdf-page .textLayer ::selection{background:rgba(196,66,58,.24)}
 .sel-rect{ position:absolute; background:rgba(196,66,58,.18); border-radius:2px; }
 
 /* —— script panel (自动生成文稿) —— */
@@ -383,6 +417,11 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
 #userChip{ color:var(--dim); font-size:12.5px; margin-left:8px; }
 #homeBtn,#logoutBtn{ font-size:13px; }
 #btnFav{ font-size:13px; }
+#webImportDialog{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;background:rgba(20,20,18,.3);backdrop-filter:blur(4px)}
+#webImportDialog.show{display:flex}#webImportCard{width:min(500px,calc(100vw - 32px));padding:22px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 18px 55px rgba(20,20,18,.16)}
+#webImportCard h2{margin:0 0 7px;font-size:18px}#webImportCard p{margin:0 0 15px;color:var(--dim);font-size:13px;line-height:1.6}#webImportUrl{width:100%;padding:10px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--surface2);color:var(--fg);font:inherit}#webImportActions{display:flex;justify-content:flex-end;gap:8px;margin-top:13px}
+#mdEditDialog{position:fixed;inset:0;z-index:91;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(20,20,18,.34);backdrop-filter:blur(4px)}#mdEditDialog.show{display:flex}#mdEditCard{width:min(1200px,96vw);height:min(760px,92vh);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 55px rgba(20,20,18,.18);overflow:hidden}#mdEditHead{display:flex;align-items:center;padding:13px 16px;border-bottom:1px solid var(--line);gap:10px}#mdEditHead strong{flex:1}#mdEditBody{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-height:0;min-width:0;flex:1}#mdEditBody>*{min-width:0}#mdEditText{width:100%;min-width:0;border:0;border-right:1px solid var(--line);resize:none;padding:16px;background:var(--surface2);color:var(--fg);font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;outline:none;white-space:pre-wrap;overflow-wrap:anywhere}#mdEditPreview{min-width:0;max-width:100%;overflow:auto;padding:18px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word}#mdEditPreview h1,#mdEditPreview h2,#mdEditPreview h3,#mdEditPreview h4,#mdEditPreview h5,#mdEditPreview h6,#mdEditPreview p,#mdEditPreview blockquote{max-width:100%;overflow-wrap:anywhere}#mdEditPreview a,#mdEditPreview code{overflow-wrap:anywhere;word-break:break-all}#mdEditPreview pre{max-width:100%;overflow:auto;white-space:pre-wrap}#mdEditPreview img{max-width:100%;height:auto}#mdEditFoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}@media(max-width:760px){#mdEditDialog{padding:0}#mdEditCard{width:100%;height:100%;max-height:none;border-radius:0}#mdEditBody{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}#mdEditText{border-right:0;border-bottom:1px solid var(--line)}}
+#captionEditDialog{position:fixed;inset:0;z-index:92;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(20,20,18,.34);backdrop-filter:blur(4px)}#captionEditDialog.show{display:flex}#captionEditCard{width:min(760px,94vw);height:min(680px,88vh);display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 55px rgba(20,20,18,.18);overflow:hidden}#captionEditHead{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}#captionEditHead strong{flex:1}#captionEditHelp{padding:11px 16px;color:var(--dim);font-size:12.5px;line-height:1.55;background:var(--surface2);border-bottom:1px solid var(--line)}#captionEditText{flex:1;min-height:0;width:100%;resize:none;border:0;outline:0;padding:16px;background:var(--surface);color:var(--fg);font:14px/1.75 ui-monospace,SFMono-Regular,Consolas,monospace}#captionEditFoot{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}#captionEditCount{margin-right:auto;color:var(--dim);font-size:12px}@media(max-width:760px){#captionEditDialog{padding:0}#captionEditCard{width:100%;height:100%;max-height:none;border-radius:0}}
 
 </style>
 <link rel="stylesheet" href="tools/editor-workflow.css">
@@ -397,24 +436,18 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
   <span id="userChip" class="hidden"></span>
   <button id="logoutBtn" class="hidden">退出</button>
   <span id="recBadge"></span>
+  <span id="headerHint" aria-live="polite"></span>
   <span id="status" role="status" aria-live="polite"></span>
   <button id="toolbarToggle" title="收起工具栏"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
-  <div class="bar on" id="recBar">
-    <span class="src-group">
+  <div class="bar on rec-tools" id="recBar">
+    <div class="rec-tool-section rec-source-section"><span class="rec-tool-section-label">素材</span><span class="src-group">
       <input type="file" id="srcPick" accept=".md,.markdown,.txt,.pdf,.ppt,.pptx,.html,.htm,image/*" multiple style="display:none">
       <input type="file" id="srcDir" webkitdirectory style="display:none">
-      <button id="srcFileBtn" class="src-btn">添加文档</button>
-      <button id="srcDirBtn" class="src-btn">添加文件夹</button>
-    </span>
-    <details class="ui-settings"><summary>更多设置</summary><div class="ui-settings-panel"><label><span>打包源文件</span><input type="checkbox" id="embedSrc" checked></label><label title="取消后只记录翻页、滚动和标注，不使用麦克风"><span>录制声音</span><input id="recordAudio" type="checkbox" checked></label></div></details>
-    <button id="btnStart" class="primary" disabled>开始录制</button>
-    <button id="btnStop" disabled>停止</button>
-    <button id="btnExport" disabled>下载讲解包</button>
-    <button id="btnPreview" disabled>预览讲解</button>
-    <button id="btnWriteScript" disabled>自己写讲稿</button>
-    <button id="btnShare" disabled>保存到主页</button>
-    <button id="btnAutoScript" disabled title="根据当前文档生成讲稿，确认后可合成语音">AI 生成讲稿</button>
-    <span id="recTimer" style="color:var(--dim);font-size:12px"></span>
+      <button id="srcFileBtn" class="src-btn">添加文档</button><button id="srcDirBtn" class="src-btn">文件夹</button><button id="btnWebImport" class="src-btn" title="导入公开网页为可编辑 Markdown">网页</button>
+    </span><button id="btnEditMarkdown" class="hidden" title="编辑当前 Markdown 草稿">编辑 MD</button><details class="ui-settings"><summary>设置</summary><div class="ui-settings-panel"><label><span>打包源文件</span><input type="checkbox" id="embedSrc" checked></label><label title="取消后只记录翻页、滚动和标注，不使用麦克风"><span>录制声音</span><input id="recordAudio" type="checkbox" checked></label></div></details></div>
+    <div class="rec-tool-section rec-session-section"><span class="rec-tool-section-label">录制</span><button id="btnStart" class="primary" disabled>开始录制</button><button id="btnStop" disabled>■ 停止</button><span id="recTimer"></span></div>
+    <div class="rec-tool-section rec-create-section"><span class="rec-tool-section-label">内容</span><button id="btnWriteScript" disabled>写讲稿</button><button id="btnAutoScript" disabled title="根据当前文档生成讲稿，确认后可合成语音">AI 讲稿</button><span id="interactionActionHost" class="hidden"></span></div>
+    <div class="rec-tool-section rec-result-section"><span class="rec-tool-section-label">完成</span><button id="btnPreview" disabled>▶ 预览</button><button id="btnEditCaptionsRec" class="hidden">编辑字幕</button><button id="btnExport" disabled>下载</button><button id="btnSaveDraft" disabled title="保存当前文件、讲稿与已完成的录制进度">存草稿</button><button id="btnShare" disabled>保存到主页</button></div>
     <span id="shareLinkWrap" class="share-link-wrap hidden">
       <input type="text" id="shareLink" readonly>
       <button id="copyLink">复制</button>
@@ -426,7 +459,8 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
     <button id="btnPlay" disabled>播放</button>
     <button id="btnSharePlay" disabled title="保存一份到自己的主页，随后可在主页管理分享">保存副本到主页</button>
     <button id="btnFav" class="hidden" disabled title="收藏当前课程，可在主页查看">☆ 收藏</button>
-    <button id="ccBtn" title="AI 讲稿字幕开关" hidden disabled>字幕</button>
+    <button id="ccBtn" title="讲解字幕开关" hidden disabled>字幕</button>
+    <button id="btnEditCaptionsPlay" class="hidden">编辑字幕</button>
     <input type="range" id="seek" min="0" max="1000" step="1" value="0" disabled>
     <span id="time">–:––</span>
     <select id="rate" disabled>
@@ -439,12 +473,15 @@ main{ flex:1; display:flex; justify-content:center; padding:24px; min-height:0; 
     </span>
   </div>
 </header>
-<div id="workflowHint" class="workflow-hint" role="status"></div>
+<div id="webImportDialog" role="dialog" aria-modal="true" aria-labelledby="webImportTitle"><div id="webImportCard"><h2 id="webImportTitle">导入网页为 Markdown</h2><p>将提取正文和页面图片，生成一份可编辑草稿。视频、音频保留原始链接；仅支持无需登录的公开网页。</p><input id="webImportUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com/article"><div id="webImportActions"><button id="webImportCancel">取消</button><button id="webImportSubmit" class="primary">开始导入</button></div></div></div>
+<div id="mdEditDialog" role="dialog" aria-modal="true" aria-labelledby="mdEditTitle"><div id="mdEditCard"><div id="mdEditHead"><strong id="mdEditTitle">编辑 Markdown 草稿</strong><button id="mdEditClose" title="关闭">×</button></div><div id="mdEditBody"><textarea id="mdEditText" spellcheck="false" aria-label="Markdown 原文"></textarea><div id="mdEditPreview" class="md-content" aria-label="实时预览"></div></div><div id="mdEditFoot"><button id="mdEditCancel">取消</button><button id="mdEditSave" class="primary">保存草稿</button></div></div></div>
+<div id="captionEditDialog" role="dialog" aria-modal="true" aria-labelledby="captionEditTitle"><div id="captionEditCard"><div id="captionEditHead"><strong id="captionEditTitle">编辑字幕时间轴</strong><button id="captionEditClose" title="关闭">×</button></div><div id="captionEditHelp">每行格式：<code>分:秒.毫秒 字幕内容</code>，例如 <code>00:12.500 这里是修正后的讲解。</code>。可新增、删除或修改任意一行。</div><textarea id="captionEditText" spellcheck="false" aria-label="字幕时间轴"></textarea><div id="captionEditFoot"><span id="captionEditCount">0 条字幕</span><button id="captionEditCancel">取消</button><button id="captionEditSave" class="primary">保存字幕</button></div></div></div>
+<div id="workflowHint" class="workflow-hint hidden" aria-hidden="true"></div>
 <main>
   <div id="stage">
     <div id="tabbar"><div id="tabs"></div></div>
     <div id="workarea">
-      <aside id="toc"><div id="toc-head"><div id="toc-title">目录</div><button id="tocCollapse" title="收起/展开目录">«</button></div></aside>
+      <aside id="toc"><div id="toc-head"><div id="toc-title">目录</div><button id="tocCollapse" title="收起/展开目录">«</button></div></aside><div id="tocResize" class="side-resizer" role="separator" aria-label="调整目录宽度" aria-orientation="vertical"></div>
       <div id="viewer"><div id="doc"></div></div>
       <div id="emptyState" class="hidden">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
@@ -544,6 +581,8 @@ let mode = 'rec';
 let source = null;      // {name, blob, type:'md'|'pdf'}
 let files = [];         // [{name, blob, mime, imgFiles, type}]
 let currentFileIndex = -1;  // 当前激活的文件索引
+let currentWebImportId = null; // 当前 tab 对应的服务器网页草稿；普通本地文件为 null
+let currentLectureDraftId = null;
 let recState = null;    // recording in progress / finished
 let play = null;        // playback state
 let pendingPlay = null;
@@ -554,9 +593,47 @@ let annotations = [];   // [{t,type,fi,offsets|coords,text?,icon?}]
 let annotationPopupEvents = []; // [{t,id,fi,open}] 批注气泡显隐时间轴
 let annotationTools = null;
 let interactionUI = null;
+const workspaceWallpapers={none:'',floral:'docs/wallpapers/floral.png',peach:'docs/wallpapers/peach.png',cherry:'docs/wallpapers/cherry.png',blue:'docs/wallpapers/4.png',daisy:'docs/wallpapers/5.png',mountain:'docs/wallpapers/6.png',terracotta:'docs/wallpapers/7.png',sage:'docs/wallpapers/8.png',clay:'docs/wallpapers/9.png'};
+let workspaceAppearance={palette:'paper',wallpaper:'none',opacity:18,blur:6};
+function readWorkspaceAppearance(){try{return {...workspaceAppearance,...JSON.parse(localStorage.getItem('llHomeAppearance')||'{}')}}catch(e){return {...workspaceAppearance}}}
+function applyWorkspaceAppearance(value){workspaceAppearance={...workspaceAppearance,...(value||{})};const src=workspaceWallpapers[workspaceAppearance.wallpaper]||'';document.documentElement.style.setProperty('--workspace-wallpaper',src?`url("${src}")`:'none');document.documentElement.style.setProperty('--workspace-wallpaper-opacity',String((Number(workspaceAppearance.opacity)||0)/100));document.documentElement.style.setProperty('--workspace-wallpaper-blur',(Number(workspaceAppearance.blur)||0)+'px');const visible=src&&Number(workspaceAppearance.opacity)>0;document.documentElement.style.setProperty('--workspace-paper-alpha',visible?'.68':'1');document.documentElement.style.setProperty('--workspace-document-alpha',visible?'.14':'0');document.documentElement.style.setProperty('--workspace-glass-blur',visible?'7px':'0')}
+function getWorkspaceAppearance(){return {wallpaper:workspaceAppearance.wallpaper||'none',opacity:Number(workspaceAppearance.opacity)||0,blur:Number(workspaceAppearance.blur)||0}}
+applyWorkspaceAppearance(readWorkspaceAppearance());
 
-// html:false：不渲染 Markdown 里的原始 HTML（分享包中的 md 是外部输入，防存储型 XSS）
-const md = window.markdownit ? markdownit({ html:false, linkify:true, breaks:false }) : null;
+// 支持 Markdown 内嵌的表格/图片 HTML，但渲染后必须经过白名单清理，避免分享包造成存储型 XSS。
+const md = window.markdownit ? markdownit({ html:true, linkify:true, breaks:false }) : null;
+const SAFE_MD_TAGS=new Set(['A','ABBR','B','BLOCKQUOTE','BR','CAPTION','CODE','DEL','DETAILS','DIV','EM','H1','H2','H3','H4','H5','H6','HR','I','IMG','KBD','LI','MARK','OL','P','PRE','S','SMALL','SPAN','STRONG','SUB','SUMMARY','SUP','TABLE','TBODY','TD','TFOOT','TH','THEAD','TR','UL']);
+const DROP_MD_TAGS=new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','FORM','INPUT','BUTTON','TEXTAREA','SELECT','OPTION','LINK','META','BASE','SVG','MATH']);
+function safeMarkdownUrl(value,isImage){
+  const v=String(value||'').trim();if(!v)return '';
+  if(isImage&&/^data:image\/(?:png|jpeg|gif|webp|svg\+xml);/i.test(v))return v;
+  if(/^(?:https?:|blob:|mailto:|#|\/|\.\.\/|\.\/)/i.test(v)||! /^[a-z][a-z0-9+.-]*:/i.test(v))return v;
+  return '';
+}
+function safeMarkdownHtml(text){
+  // 一些编辑器会把 HTML 标签写成 \<table>；仅对允许的展示标签恢复尖括号。
+  const raw=String(text||'').replace(/\\<(\/?(?:table|thead|tbody|tfoot|tr|th|td|caption|img|a|br)\b[^>]*)>/gi,'<$1>');
+  const tpl=document.createElement('template');tpl.innerHTML=md.render(raw);
+  [...tpl.content.querySelectorAll('*')].forEach(el=>{
+    if(!SAFE_MD_TAGS.has(el.tagName)){
+      if(DROP_MD_TAGS.has(el.tagName)){el.remove();return}
+      el.replaceWith(...el.childNodes);return;
+    }
+    [...el.attributes].forEach(attr=>{
+      const n=attr.name.toLowerCase(),v=attr.value;
+      const allowed=n==='title'||(el.tagName==='IMG'&&n==='alt')||(el.tagName==='CODE'&&n==='class'&&/^language-[\w-]+$/.test(v))
+        ||(['TD','TH'].includes(el.tagName)&&n==='colspan'&&/^\d{1,2}$/.test(v))
+        ||(['TD','TH'].includes(el.tagName)&&n==='rowspan'&&/^\d{1,3}$/.test(v))
+        ||(['TABLE','TH','TD','IMG'].includes(el.tagName)&&['width','height'].includes(n)&&/^\d+(?:\.\d+)?%?$/.test(v))
+        ||(['TH','TD'].includes(el.tagName)&&n==='valign'&&/^(?:top|middle|bottom)$/.test(v))
+        ||(el.tagName==='A'&&n==='href')||(el.tagName==='IMG'&&n==='src');
+      if(!allowed){el.removeAttribute(attr.name);return}
+      if(n==='href'||n==='src'){const safe=safeMarkdownUrl(v,n==='src');if(safe)el.setAttribute(n,safe);else el.removeAttribute(n)}
+    });
+    if(el.tagName==='A'&&el.hasAttribute('href'))el.setAttribute('rel','noopener noreferrer');
+  });
+  return tpl.innerHTML;
+}
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
 function status(msg, isErr){
@@ -796,7 +873,8 @@ function sourceMime(type){ return type === 'pdf' ? 'application/pdf' : type === 
 function makeEntry(f, imgs){
   const isPdf = /\.pdf$/i.test(f.name);
   return { name: f.name, blob: f, mime: sourceMime(sourceType(f.name)), type: sourceType(f.name),
-           imgFiles: imgs || [], rel: relPathOf(f) };
+           imgFiles: imgs || [], rel: relPathOf(f), originalPresentation:f.originalPresentation || null,
+           webImportId:f.webImportId || null };
 }
 function splitFileList(list){
   return {
@@ -808,14 +886,11 @@ async function convertPresentationFile(file){
   status('正在将 ' + file.name + ' 转换为 PDF…');
   const form = new FormData();
   form.append('file', file, file.name);
-  const res = await fetch('/api/convert-ppt', {method:'POST', body:form});
-  if(!res.ok){
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || ('PPT 转换失败（HTTP ' + res.status + '）'));
-  }
-  const blob = await res.blob();
+  const blob = await new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST','/api/convert-ppt');xhr.responseType='blob';xhr.upload.onprogress=e=>{if(e.lengthComputable)status('正在上传并转换 '+file.name+'… '+Math.round(e.loaded/e.total*100)+'%')};xhr.onerror=()=>reject(new Error('PPT 上传失败，请检查网络'));xhr.onload=async()=>{if(xhr.status>=200&&xhr.status<300)return resolve(xhr.response);let message='PPT 转换失败（HTTP '+xhr.status+'）';try{message=(JSON.parse(await xhr.response.text())).error||message}catch(e){}reject(new Error(message))};xhr.send(form)});
   const pdfName = file.name.replace(/\.pptx?$/i, '') + '.pdf';
-  return new File([blob], pdfName, {type:'application/pdf', lastModified:file.lastModified});
+  const converted = new File([blob], pdfName, {type:'application/pdf', lastModified:file.lastModified});
+  converted.originalPresentation = file;
+  return converted;
 }
 async function preparePresentationFiles(list){
   const prepared = [];
@@ -832,6 +907,8 @@ async function resetWorkspaceForNewSources(){
     return false;
   }
   recState = null;
+  setCurrentRec(null, false);
+  lastLoadedZipBlob = null;
   $('btnExport').disabled = true;
   annotations = [];
   annotationPopupEvents = [];
@@ -1012,6 +1089,7 @@ async function renderSource(entry){
 
   entry._imgUrls = [];
   doc.classList.toggle('html-document', type === 'html');
+  doc.classList.toggle('pdf-document', type === 'pdf');
   $('toc').classList.toggle('hidden', type === 'html');
   // 建立图片路径→blobURL 映射, 处理 md 中的相对路径图片
   const imgMap = {};
@@ -1098,15 +1176,22 @@ async function renderSource(entry){
     });
     const div = document.createElement('div');
     div.className = 'md-content';
-    div.innerHTML = md.render(processedText);
+    div.innerHTML = safeMarkdownHtml(processedText);
     // 后处理: 对所有 img, 如果 src 还是相对路径且 imgMap 有匹配, 替换
     div.querySelectorAll('img').forEach(imgEl => {
       const rawSrc = imgEl.getAttribute('src');
+      if (!rawSrc) return;
       if (/^(data:|https?:|blob:)/i.test(rawSrc)) return;
       const key = rawSrc.toLowerCase().replace(/^\.\//, '');
       if (imgMap[key]) { imgEl.src = imgMap[key]; return; }
       const base = rawSrc.split('/').pop().split('\\').pop().toLowerCase();
       if (imgMap[base]) imgEl.src = imgMap[base];
+    });
+    // HTML 表格常用 <a href="assets/x.png"><img ...></a>；链接也映射到包内图片。
+    div.querySelectorAll('a[href]').forEach(link=>{
+      const raw=link.getAttribute('href')||'';if(!raw||/^(?:https?:|mailto:|#|blob:|data:)/i.test(raw))return;
+      const key=raw.toLowerCase().replace(/^\.\//,'');const base=raw.split('/').pop().split('\\').pop().toLowerCase();
+      const mapped=imgMap[key]||imgMap[base];if(mapped)link.href=mapped;
     });
     doc.appendChild(div);
     if (window.MathJax?.typesetPromise) {
@@ -1119,7 +1204,9 @@ async function renderSource(entry){
     if (!window.pdfjsLib){ status('pdf.js 未加载（需联网）'); return; }
     const buf = new Uint8Array(await blob.arrayBuffer());
     const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-    const pageW = 880;
+    const pageW = Math.min(1100, Math.max(520, viewer.clientWidth - 56));
+    const outputScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const pdfText = [];
     for (let i = 1; i <= pdf.numPages; i++){
       status('渲染 PDF ' + i + '/' + pdf.numPages + '…');
       const page = await pdf.getPage(i);
@@ -1130,20 +1217,28 @@ async function renderSource(entry){
       wrap.className = 'pdf-page';
       wrap.style.width = Math.ceil(vp.width) + 'px';
       const canvas = document.createElement('canvas');
-      canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+      canvas.width = Math.ceil(vp.width * outputScale); canvas.height = Math.ceil(vp.height * outputScale);
+      canvas.style.width = Math.ceil(vp.width) + 'px'; canvas.style.height = Math.ceil(vp.height) + 'px';
       wrap.appendChild(canvas);
       const tl = document.createElement('div');
       tl.className = 'textLayer';
       wrap.appendChild(tl);
       doc.appendChild(wrap);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp, transform:outputScale===1?null:[outputScale,0,0,outputScale,0,0] }).promise;
       try {
         const tc = await page.getTextContent();
-        await page.renderTextLayer({ textContent: tc, container: tl, viewport: vp }).promise;
+        pdfText.push(tc.items.map(item=>item.str||'').join(' '));
+        if(pdfjsLib.renderTextLayer){
+          const task=pdfjsLib.renderTextLayer({textContentSource:tc,container:tl,viewport:vp,textDivs:[]});
+          if(task?.promise)await task.promise;
+        }else if(page.renderTextLayer){
+          const task=page.renderTextLayer({textContent:tc,container:tl,viewport:vp});
+          if(task?.promise)await task.promise;
+        }
       } catch (e) {}
     }
-    source = { name, blob, type, pdf };
-    contentEl = doc.querySelector('.pdf-page') || doc;
+    source = { name, blob, type, pdf, text:pdfText.join('\n\n') };
+    contentEl = doc;
   }
   selLayer = document.createElement('div');
   selLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:5;';
@@ -1175,9 +1270,20 @@ document.addEventListener('click', e => {
   if (!e.target.closest('#tocCollapse')) return;
   const toc = $('toc');
   const collapsed = toc.classList.toggle('collapsed');
+  if (collapsed) toc.style.width = '40px';
+  else { const saved=Number(localStorage.getItem('llTocWidth'));toc.style.width=(saved||200)+'px'; }
   try { localStorage.setItem('llTocCollapsed', collapsed ? '1' : '0'); } catch(err){}
 });
 try { if (localStorage.getItem('llTocCollapsed') === '1') $('toc').classList.add('collapsed'); } catch(e){}
+(function setupTocResize(){
+  const toc=$('toc'), handle=$('tocResize');
+  try{const saved=Number(localStorage.getItem('llTocWidth'));if(saved&&!toc.classList.contains('collapsed'))toc.style.width=saved+'px';}catch(e){}
+  let start=null;
+  handle.addEventListener('pointerdown',e=>{start={x:e.clientX,width:toc.getBoundingClientRect().width};handle.classList.add('dragging');handle.setPointerCapture(e.pointerId);document.body.style.userSelect='none';});
+  handle.addEventListener('pointermove',e=>{if(!start)return;const width=Math.max(170,Math.min(380,start.width+e.clientX-start.x));toc.style.width=width+'px';});
+  const stop=()=>{if(!start)return;try{localStorage.setItem('llTocWidth',String(Math.round(toc.getBoundingClientRect().width)));}catch(e){}start=null;handle.classList.remove('dragging');document.body.style.userSelect='';};
+  handle.addEventListener('pointerup',stop);handle.addEventListener('pointercancel',stop);
+})();
 
 function updateToc(){
   const toc = $('toc');
@@ -1295,6 +1401,123 @@ function audioDuration(blob){
 }
 
 $('srcFileBtn').addEventListener('click', () => $('srcPick').click());
+
+function setWebImportDialog(open){
+  $('webImportDialog').classList.toggle('show', !!open);
+  if(open) setTimeout(()=>$('webImportUrl').focus(), 20);
+}
+function base64File(data, name, type){
+  const raw=atob(data), bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  return new File([bytes],name,{type:type||'application/octet-stream'});
+}
+async function openWebImportDraft(id){
+  status('正在加载网页草稿…');
+  const draft=await apiJSON('/api/web-imports/'+encodeURIComponent(id));
+  const mdFile=new File([draft.markdown],(draft.title||'网页导入').replace(/[\\/:*?"<>|]/g,'-')+'.md',{type:'text/markdown'});
+  mdFile.webImportId=draft.id;
+  const images=(draft.assets||[]).map(asset=>base64File(asset.data,asset.name,asset.content_type));
+  await ingestFiles([mdFile,...images],{reset:true});
+  status('已加载网页草稿：'+draft.title+(images.length?'（含 '+images.length+' 张图片）':''));
+}
+$('btnWebImport').addEventListener('click',()=>setWebImportDialog(true));
+$('webImportCancel').addEventListener('click',()=>setWebImportDialog(false));
+$('webImportDialog').addEventListener('click',e=>{if(e.target===$('webImportDialog'))setWebImportDialog(false)});
+$('webImportUrl').addEventListener('keydown',e=>{if(e.key==='Enter')$('webImportSubmit').click();if(e.key==='Escape')setWebImportDialog(false)});
+$('webImportSubmit').addEventListener('click',async()=>{
+  const url=$('webImportUrl').value.trim(); if(!url)return status('请先输入网页地址',true);
+  const b=$('webImportSubmit'); b.disabled=true; b.textContent='正在抓取…';
+  try{const result=await apiJSON('/api/web-import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});setWebImportDialog(false);await openWebImportDraft(result.id)}
+  catch(err){status('网页导入失败：'+err.message,true)}finally{b.disabled=false;b.textContent='开始导入'}
+});
+function renderMarkdownEditPreview(text){
+  const preview=$('mdEditPreview');
+  if(!md){preview.textContent='Markdown 渲染器尚未加载';return}
+  preview.innerHTML=safeMarkdownHtml(text);
+  preview.querySelectorAll('img').forEach(img=>{
+    const raw=img.getAttribute('src')||'';const base=raw.split('/').pop().toLowerCase();
+    const map=source?.imgMap||{}; if(map[raw.toLowerCase()]||map[base])img.src=map[raw.toLowerCase()]||map[base];
+  });
+  preview.querySelectorAll('a[href]').forEach(link=>{
+    const raw=link.getAttribute('href')||'';if(!raw||/^(?:https?:|mailto:|#|blob:|data:)/i.test(raw))return;
+    const map=source?.imgMap||{},key=raw.toLowerCase().replace(/^\.\//,''),base=raw.split('/').pop().split('\\').pop().toLowerCase();
+    if(map[key]||map[base])link.href=map[key]||map[base];
+  });
+}
+function closeMarkdownEditor(){ $('mdEditDialog').classList.remove('show'); }
+$('btnEditMarkdown').addEventListener('click',()=>{
+  if(source?.type!=='md')return;
+  $('mdEditText').value=source.text||'';renderMarkdownEditPreview(source.text||'');
+  $('mdEditDialog').classList.add('show');setTimeout(()=>$('mdEditText').focus(),20);
+});
+$('mdEditText').addEventListener('input',e=>renderMarkdownEditPreview(e.target.value));
+$('mdEditClose').onclick=$('mdEditCancel').onclick=closeMarkdownEditor;
+$('mdEditDialog').onclick=e=>{if(e.target===$('mdEditDialog'))closeMarkdownEditor()};
+$('mdEditSave').addEventListener('click',async()=>{
+  const text=$('mdEditText').value.trim();if(!text)return status('Markdown 不能为空',true);
+  const b=$('mdEditSave');b.disabled=true;b.textContent='保存中…';
+  try{
+    const result=currentWebImportId
+      ? await apiJSON('/api/web-imports/'+encodeURIComponent(currentWebImportId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({markdown:text})})
+      : {title:files[currentFileIndex]?.name||'Markdown'};
+    const entry=files[currentFileIndex];entry.blob=new File([text],entry.name,{type:'text/markdown'});entry.webImportId=currentWebImportId;
+    await renderSource(entry);updateTabs();closeMarkdownEditor();status('草稿已保存：'+(result.title||entry.name));
+  }catch(err){status('保存草稿失败：'+err.message,true)}finally{b.disabled=false;b.textContent='保存草稿'}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('mdEditDialog').classList.contains('show'))closeMarkdownEditor()});
+
+function captionStamp(ms){
+  ms=Math.max(0,Math.round(Number(ms)||0));const m=Math.floor(ms/60000),s=Math.floor(ms%60000/1000),x=ms%1000;
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+'.'+String(x).padStart(3,'0');
+}
+function captionRows(){
+  const rows=(play?.script || recState?.json?.script || []);
+  return Array.isArray(rows)?rows:[];
+}
+function closeCaptionEditor(){ $('captionEditDialog').classList.remove('show'); }
+function openCaptionEditor(){
+  const rows=captionRows().slice().sort((a,b)=>(Number(a.t??a.startMs)||0)-(Number(b.t??b.startMs)||0));
+  $('captionEditText').value=rows.map(r=>captionStamp(r.t??r.startMs)+' '+String(r.text||'').replace(/\s*\n\s*/g,' ')).join('\n');
+  $('captionEditCount').textContent=rows.length+' 条字幕';
+  $('captionEditDialog').classList.add('show');setTimeout(()=>$('captionEditText').focus(),20);
+}
+function parseCaptionText(value){
+  const out=[];
+  value.split(/\r?\n/).forEach((raw,index)=>{
+    const line=raw.trim();if(!line)return;
+    const m=line.match(/^(?:(\d+):)?([0-5]?\d):([0-5]\d)(?:\.(\d{1,3}))?\s+(.+)$/);
+    if(!m)throw new Error('第 '+(index+1)+' 行格式不正确');
+    const h=Number(m[1]||0),min=Number(m[2]),sec=Number(m[3]),frac=String(m[4]||'0').padEnd(3,'0');
+    out.push({text:m[5].trim(),t:((h*60+min)*60+sec)*1000+Number(frac),source:'edited'});
+  });
+  out.sort((a,b)=>a.t-b.t);
+  for(let i=0;i<out.length;i++)out[i].d=Math.max(400,Math.min(8000,(out[i+1]?.t??out[i].t+3200)-out[i].t));
+  return out;
+}
+async function rewriteLoadedPackageScript(json,rows){
+  if(!lastLoadedZipBlob)return;
+  const zip=await JSZip.loadAsync(lastLoadedZipBlob);json.script=rows;
+  zip.file('lecture.json',JSON.stringify(json,null,2));
+  lastLoadedZipBlob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+}
+$('btnEditCaptionsRec').onclick=$('btnEditCaptionsPlay').onclick=openCaptionEditor;
+$('captionEditClose').onclick=$('captionEditCancel').onclick=closeCaptionEditor;
+$('captionEditDialog').onclick=e=>{if(e.target===$('captionEditDialog'))closeCaptionEditor()};
+$('captionEditText').addEventListener('input',()=>{$('captionEditCount').textContent=$('captionEditText').value.split(/\r?\n/).filter(x=>x.trim()).length+' 条字幕'});
+$('captionEditSave').addEventListener('click',async()=>{
+  const b=$('captionEditSave');
+  try{
+    const rows=parseCaptionText($('captionEditText').value);const json=play?.json||recState?.json;
+    if(!json)throw new Error('当前没有可编辑的讲解');
+    b.disabled=true;b.textContent='保存中…';json.script=rows;
+    if(recState?.json===json)recState.json.script=rows;
+    if(play){play.script=rows;play.json=json;setupSubtitle(json);updateSubtitle(currentPlaybackMs())}
+    await rewriteLoadedPackageScript(json,rows);
+    if(currentRecId)await apiJSON('/api/recordings/'+encodeURIComponent(currentRecId)+'/captions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:rows})});
+    closeCaptionEditor();status('字幕已保存，共 '+rows.length+' 条');
+  }catch(err){status('字幕保存失败：'+err.message,true)}finally{b.disabled=false;b.textContent='保存字幕'}
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('captionEditDialog').classList.contains('show'))closeCaptionEditor()});
 
 $('srcPick').addEventListener('change', e => {
   handleFileInput(e, files.length > 0);  // 已有文件时追加，否则覆盖
@@ -1439,6 +1662,31 @@ $('srcPick2').addEventListener('change', async e => {
   }
 })();
 
+function startManualCaptionCapture(state){
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition||!state.rec)return false;
+  const recognition=new SpeechRecognition();
+  recognition.lang=(navigator.language||'zh-CN').startsWith('zh')?'zh-CN':navigator.language;
+  recognition.continuous=true;recognition.interimResults=true;recognition.maxAlternatives=1;
+  state.speechSegments=[];state.speechRecognition=recognition;state.speechStopped=false;
+  let speechStart=0,lastEnd=0;
+  recognition.onspeechstart=()=>{speechStart=Math.max(lastEnd,performance.now()-state.st0)};
+  recognition.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const result=e.results[i];if(!result.isFinal)continue;
+      const text=String(result[0]?.transcript||'').trim();if(!text)continue;
+      const end=Math.max(lastEnd+400,performance.now()-state.st0);
+      const estimate=Math.max(700,Math.min(8000,text.length*260));
+      const start=Math.max(lastEnd,speechStart||end-estimate);
+      state.speechSegments.push({text,t:Math.round(start),d:Math.max(400,Math.round(end-start)),source:'speech'});
+      lastEnd=end;speechStart=0;
+    }
+  };
+  recognition.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')state.speechStopped=true};
+  recognition.onend=()=>{if(!state.speechStopped&&recState===state)setTimeout(()=>{try{recognition.start()}catch(e){}},180)};
+  try{recognition.start();return true}catch(e){return false}
+}
+
 async function startRec(){
   if (!source) return;
   if (recState && !recState.finished) return;   // 正在录制中
@@ -1471,16 +1719,22 @@ async function startRec(){
 
   const onMove = throttle(e => {
     const cr = getContentRect();
-    // 存相对内容元素的比例 (0~1), 确保跨屏幕/缩放一致
+    const vr = viewer.getBoundingClientRect();
+    // x/y 保留给旧播放器；vx/vy 直接记录可视播放器坐标，避免人工录制受文档高度和滚动影响。
     const rx = cr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - cr.left) / cr.width)) : 0;
     const ry = cr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - cr.top) / cr.height)) : 0;
-    cursor.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
+    const vx = vr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - vr.left) / vr.width)) : 0;
+    const vy = vr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - vr.top) / vr.height)) : 0;
+    cursor.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * CURSOR_PREC) / CURSOR_PREC, y: Math.round(ry * CURSOR_PREC) / CURSOR_PREC, vx:Math.round(vx*CURSOR_PREC)/CURSOR_PREC, vy:Math.round(vy*CURSOR_PREC)/CURSOR_PREC });
   }, 40);
   const onDown = e => {
     const cr = getContentRect();
+    const vr = viewer.getBoundingClientRect();
     const rx = cr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - cr.left) / cr.width)) : 0;
     const ry = cr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - cr.top) / cr.height)) : 0;
-    clicks.push({ t: Math.round(performance.now() - st0), x: Math.round(rx * 10000) / 10000, y: Math.round(ry * 10000) / 10000 });
+    const vx = vr.width > 0 ? Math.max(0, Math.min(1, (e.clientX - vr.left) / vr.width)) : 0;
+    const vy = vr.height > 0 ? Math.max(0, Math.min(1, (e.clientY - vr.top) / vr.height)) : 0;
+    clicks.push({ t: Math.round(performance.now() - st0), x: Math.round(rx*CURSOR_PREC)/CURSOR_PREC, y: Math.round(ry*CURSOR_PREC)/CURSOR_PREC, vx:Math.round(vx*CURSOR_PREC)/CURSOR_PREC, vy:Math.round(vy*CURSOR_PREC)/CURSOR_PREC });
   };
   function curSel(){
     if (source.type !== 'md') return null;
@@ -1515,6 +1769,7 @@ async function startRec(){
   const iv = setInterval(pushState, 250);
 
   recState = { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown, finished: false };
+  const capturingCaptions=startManualCaptionCapture(recState);
   $('btnStart').disabled = true;
   $('btnStop').disabled = false;
   $('srcPick').disabled = true;
@@ -1524,7 +1779,7 @@ async function startRec(){
     renderRecIndicator('<span class="rec-dot"></span>' + fmtTime((performance.now() - recState.st0) / 1000));
   }, 250);
   headerEl.classList.add('recording');
-  status((overwrite ? '新录制（将替换上次结果）… ' : '') + '边讲边滚动 / 选中文字 / 点击即可');
+  status((overwrite ? '新录制（将替换上次结果）… ' : '') + '边讲边滚动 / 选中文字 / 点击即可'+(capturingCaptions?'；正在同步生成字幕':'；录制后可手动编辑字幕'));
 }
 $('btnStart').addEventListener('click', startRec);
 
@@ -1532,7 +1787,11 @@ async function stopRec(){
   // 录制演讲进行中：中止它
   if (recordingScript){ scriptRecAbort = true; return; }
   if (!recState || recState.finished) return;
-  const { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown } = recState;
+  const activeState=recState;
+  activeState.speechStopped=true;
+  try{activeState.speechRecognition?.stop()}catch(e){}
+  await new Promise(resolve=>setTimeout(resolve,280));
+  const { rec, chunks, states, cursor, clicks, fileSwitches, st0, stream, iv, onScroll, onMove, onDown, speechSegments=[] } = activeState;
   $('btnStop').disabled = true;
   if(htmlPresenter){const state=await htmlPresenter.capture();if(state)htmlTimeline.push({t:Math.round(performance.now()-st0),fi:currentFileIndex,state});}
   clearInterval(iv);
@@ -1554,6 +1813,7 @@ async function stopRec(){
     v: 4, app: 'LectureLite', created: new Date().toISOString(),
     duration: (performance.now() - st0) / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+    appearance: getWorkspaceAppearance(),
     // 兼容旧格式：若有多个文件用 files，否则保留 file
     file: { name: (files[currentFileIndex] || {}).name || source.name, mime: sourceMime(source.type) },
     files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
@@ -1561,7 +1821,8 @@ async function stopRec(){
     states, cursor, clicks, htmlStates:htmlTimeline,
     annotations: snapshotAnnotations(),
     annotationPopups: snapshotAnnotationPopups(),
-    interactions: interactionUI?.exportQuestions() || []
+    interactions: interactionUI?.exportQuestions() || [],
+    script: speechSegments.filter(x=>x.text&&Number.isFinite(x.t)).sort((a,b)=>a.t-b.t)
   };
   recState = { audioBlob, json, finished: true };
 
@@ -1572,7 +1833,7 @@ async function stopRec(){
   $('btnShare').disabled = false;
   headerEl.classList.remove('recording');
   renderRecIndicator('<span class="rec-dot" style="background:#6b6b67;animation:none"></span>' + fmtTime(json.duration));
-  status('录制完成：' + fmtTime(json.duration) + (audioBlob ? '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB' : '，仅操作（无音频）') + '，' + files.length + ' 个文件 → 可预览、下载或保存');
+  status('录制完成：' + fmtTime(json.duration) + (audioBlob ? '，音频 ' + (audioBlob.size/1048576).toFixed(1) + ' MB' : '，仅操作（无音频）') + '，' + json.script.length + ' 条字幕，' + files.length + ' 个文件 → 可预览、编辑字幕、下载或保存');
 
   // 用真实音频时长修正时间轴长度（比墙钟更准），失败不影响导出
   if(audioBlob) audioDuration(audioBlob).then(d => {
@@ -1594,6 +1855,7 @@ async function exportZip(){
   if ($('embedSrc').checked){
     for (const f of files){
       zipAdd(f.rel || f.name, f.blob);
+      if(f.originalPresentation)zipAdd('sources/original/'+f.originalPresentation.name,f.originalPresentation);
       if (f.imgFiles){
         for (const img of f.imgFiles) zipAdd(relPathOf(img) || img.name, img);
       }
@@ -1617,6 +1879,34 @@ async function exportZip(){
   status('已导出 ' + a.download + '（' + (blob.size/1048576).toFixed(1) + ' MB，' + files.length + ' 个文件' + audioNote + '）— 把这一个文件发给听众即可');
 }
 $('btnExport').addEventListener('click', exportZip);
+
+async function buildDraftPackage(){
+  if(recState&&!recState.finished)await stopRec();
+  const audioBlob=recState?.finished?recState.audioBlob:null;
+  const json=recState?.finished?{...recState.json,draft:true}:{
+    v:4,app:'LectureLite',draft:true,created:new Date().toISOString(),duration:0,
+    viewport:{w:viewer.clientWidth,h:viewer.clientHeight},appearance:getWorkspaceAppearance(),
+    file:{name:(files[currentFileIndex]||{}).name||source.name,mime:sourceMime(source.type)},
+    files:files.map(f=>({name:f.rel||f.name,mime:f.mime||sourceMime(f.type),type:f.type})),
+    fileSwitches:currentFileIndex>=0?[{t:0,fi:currentFileIndex}]:[],states:[],cursor:[],clicks:[],htmlStates:htmlTimeline,
+    annotations:snapshotAnnotations(),annotationPopups:snapshotAnnotationPopups(),interactions:interactionUI?.exportQuestions()||[]
+  };
+  const zip=new JSZip(),written=new Set(),add=(path,data)=>{if(path&&!written.has(path)){zip.file(path,data);written.add(path)}};
+  for(const f of files){add(f.rel||f.name,f.blob);if(f.originalPresentation)add('sources/original/'+f.originalPresentation.name,f.originalPresentation);for(const img of f.imgFiles||[])add(relPathOf(img)||img.name,img)}
+  if(audioBlob){const ty=audioBlob.type||'audio/webm',ext=ty.includes('mp4')?'m4a':ty.includes('ogg')?'ogg':ty.includes('wav')?'wav':ty.includes('mpeg')?'mp3':'webm';zip.file('audio.'+ext,audioBlob)}
+  zip.file('lecture.json',JSON.stringify(json));return zip.generateAsync({type:'blob'});
+}
+$('btnSaveDraft').addEventListener('click',async()=>{
+  if(!source)return;const b=$('btnSaveDraft');b.disabled=true;
+  try{
+    status(recState&&!recState.finished?'正在停止录制并保存草稿…':'正在保存草稿…');
+    const blob=await buildDraftPackage(),fd=new FormData(),title=baseName(files[0]?.name||source.name||'未命名讲解');
+    fd.append('file',new File([blob],title+'.lecture.zip',{type:'application/zip'}));
+    const headers={'X-Draft-Title':encodeURIComponent(title)};if(currentLectureDraftId)headers['X-Draft-Id']=currentLectureDraftId;
+    const result=await fetch('/api/drafts',{method:'POST',headers,body:fd}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'HTTP '+r.status);return d});
+    currentLectureDraftId=result.id;if(recState)recState.saved=true;status('草稿已保存，可在主页“草稿箱”继续编辑');
+  }catch(err){status('保存草稿失败：'+err.message,true)}finally{b.disabled=false}
+});
 
 /* ---------- share ---------- */
 async function doShare(zipBlob, fileName, linkInputId, wrapId){
@@ -1648,6 +1938,7 @@ $('btnShare').addEventListener('click', async () => {
   if ($('embedSrc').checked){
     for (const f of files){
       zipAdd(f.rel || f.name, f.blob);
+      if(f.originalPresentation)zipAdd('sources/original/'+f.originalPresentation.name,f.originalPresentation);
       if (f.imgFiles){ for (const img of f.imgFiles) zipAdd(relPathOf(img) || img.name, img); }
     }
   }
@@ -1687,7 +1978,8 @@ function imageMime(name){
   if (/\.bmp$/.test(n)) return 'image/bmp';
   return 'image/png';
 }
-async function loadZip(file){
+async function loadZip(file, options){
+  options=options||{};
   if ((recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript){status('请先停止录制再打开课程',true);return;}
   lastLoadedZipBlob = file;
   lastLoadedZipName = file.name;
@@ -1708,6 +2000,7 @@ async function loadZip(file){
     try { json = JSON.parse(await jsonEntry.async('string')); }
     catch(e){ throw new Error('lecture.json 不是合法 JSON'); }
     if (!json || typeof json !== 'object') throw new Error('lecture.json 格式错误');
+    applyWorkspaceAppearance(json.appearance || readWorkspaceAppearance());
     const rawMetas = Array.isArray(json.files) && json.files.length
       ? json.files : (json.file ? [json.file] : []);
     if (!rawMetas.length || !rawMetas.every(meta => meta && safeZipPath(meta.name))) {
@@ -1784,8 +2077,15 @@ async function loadZip(file){
     files = preparedFiles;
     currentFileIndex = 0;
     await switchToFile(0);
-    startPlayback({ json, audioBlob });
-    $('btnSharePlay').disabled = false;
+    if(options.asDraft){
+      play=null;currentLectureDraftId=options.draftId||null;
+      recState=json.duration||audioBlob?{json,audioBlob,finished:true,saved:true}:null;
+      setMode('rec');$('btnStart').disabled=false;$('btnStop').disabled=true;
+      status('讲解草稿已恢复，可继续编辑或重新录制');
+    }else{
+      startPlayback({ json, audioBlob });
+      $('btnSharePlay').disabled = false;
+    }
   } catch (err){ status('加载失败：' + err.message); }
 }
 $('zipPick').addEventListener('change', e => {
@@ -1811,6 +2111,7 @@ function startPlayback({ json, audioBlob }){
     audio.playbackRate = parseFloat($('rate').value);
   }
   play = {
+    json,
     audio,
     hasAudio,
     htmlStates: (Array.isArray(json.htmlStates) ? json.htmlStates : []).filter(s => s && Number.isFinite(s.t) && Number.isInteger(s.fi) && s.state && typeof s.state === 'object').slice(0,100000).sort((a,b)=>a.t-b.t),
@@ -1852,12 +2153,18 @@ function startPlayback({ json, audioBlob }){
   updateSubtitle(seek0);
 }
 
-/* ---------- 字幕（AI 讲稿逐句显示，仅 AI 生成包有 script 字段） ---------- */
+/* ---------- 字幕（AI 讲稿与人工录制共用同一条 script 时间轴） ---------- */
 let ccSentenceIdx = -1;
 
 function setupSubtitle(json){
   ccSentenceIdx = -1;
-  const hasScript = !!(json.script && json.script.length);
+  const normalized=(Array.isArray(json.script)?json.script:[]).map(row=>{
+    const t=Math.max(0,Number(row.t??row.startMs)||0);
+    const d=Math.max(0,Number(row.d??((Number(row.endMs)||0)-(Number(row.startMs)||0)))||0);
+    return {...row,text:String(row.text||''),t,d};
+  }).filter(row=>row.text).sort((a,b)=>a.t-b.t);
+  json.script=normalized;
+  const hasScript = normalized.length > 0;
   const btn = $('ccBtn');
   btn.hidden = !hasScript;
   btn.disabled = !hasScript;
@@ -1865,9 +2172,10 @@ function setupSubtitle(json){
     $('ccBar').classList.add('hidden');
     $('ccTranscript').classList.add('hidden');
     $('ccText').textContent = '';
+    if(play)play.script=[];
     return;
   }
-  play.script = json.script;
+  play.script = normalized;
   // 恢复用户上次的开关偏好
   applyCcState(localStorage.getItem('ccOn') !== '0');
 }
@@ -1929,9 +2237,9 @@ function renderTranscript(){
   const body=$('ccTranscriptBody');
   if(!play?.script?.length){ body.replaceChildren(); return; }
   const escCc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  body.innerHTML=play.script.map((row,i)=>'<div class="cc-transcript-row'+(i===ccSentenceIdx?' active':'')+'" data-i="'+i+'"><span class="cc-transcript-time">'+fmtTime((row.startMs||0)/1000)+'</span><span>'+escCc(row.text||'')+'</span></div>').join('');
+  body.innerHTML=play.script.map((row,i)=>'<div class="cc-transcript-row'+(i===ccSentenceIdx?' active':'')+'" data-i="'+i+'"><span class="cc-transcript-time">'+fmtTime((row.t??row.startMs??0)/1000)+'</span><span>'+escCc(row.text||'')+'</span></div>').join('');
   body.querySelectorAll('[data-i]').forEach(el=>el.addEventListener('click',()=>{
-    const ms=Number(play.script[Number(el.dataset.i)].startMs)||0;
+    const row=play.script[Number(el.dataset.i)];const ms=Number(row.t??row.startMs)||0;
     $('seek').value=String(Math.round(ms/10));
     $('seek').dispatchEvent(new Event('input',{bubbles:true}));
   }));
@@ -2056,6 +2364,7 @@ async function setActiveFile(fi){
   
   currentFileIndex = fi;
   const f = files[fi];
+  currentWebImportId = f.webImportId || null;
   await renderSource(f);
   updateTabs();
   
@@ -2132,12 +2441,22 @@ async function applyState(t){
     }
   }
 }
-// x/y 是相对内容元素的比例 (0~1), 乘以当前内容尺寸得到像素, 再转到 #stage 坐标系
+// x/y 是相对内容元素的比例 (0~1)。光标实际位于 #workarea 内，必须转换到它
+// 自己的定位父容器；过去减 #stage 会把 tabbar 高度重复加到 top，导致稳定向下偏移。
 function setCursorPos(el, x, y){
   const cr = getContentRect();
-  const sr = stage.getBoundingClientRect();
-  el.style.left = (x * cr.width + cr.left - sr.left) + 'px';
-  el.style.top = (y * cr.height + cr.top - sr.top) + 'px';
+  const host = el.offsetParent || stage;
+  const hr = host.getBoundingClientRect();
+  const originX = hr.left + (host.clientLeft || 0);
+  const originY = hr.top + (host.clientTop || 0);
+  el.style.left = (x * cr.width + cr.left - originX) + 'px';
+  el.style.top = (y * cr.height + cr.top - originY) + 'px';
+}
+function setCursorViewportPos(el,x,y){
+  const vr=viewer.getBoundingClientRect(),host=el.offsetParent||stage,hr=host.getBoundingClientRect();
+  const originX=hr.left+(host.clientLeft||0),originY=hr.top+(host.clientTop||0);
+  el.style.left=(x*vr.width+vr.left-originX)+'px';
+  el.style.top=(y*vr.height+vr.top-originY)+'px';
 }
 // 由选区计算内容锚定的光标比例坐标（目标文本末行中点），与离线生成同规则
 function cursorPosFromRange(r){
@@ -2223,13 +2542,17 @@ function applyCursor(t){
   el.style.display = 'block';
   // 采样只是关键锚点：在 t 前后两个采样之间线性插值，每帧连续推进，
   // 光标滑动而不是逐点跳变（线性避免逐段缓动带来的"走走停停"）
-  let x = p.x, y = p.y;
+  let x = p.x, y = p.y, vx=p.vx, vy=p.vy;
   if (next && t < next.t && next.t - p.t > 1){
     const f = (t - p.t) / (next.t - p.t);
     x = p.x + (next.x - p.x) * f;
     y = p.y + (next.y - p.y) * f;
+    if(Number.isFinite(p.vx)&&Number.isFinite(p.vy)&&Number.isFinite(next.vx)&&Number.isFinite(next.vy)){
+      vx=p.vx+(next.vx-p.vx)*f;vy=p.vy+(next.vy-p.vy)*f;
+    }
   }
-  setCursorPos(el, x, y);
+  if(Number.isFinite(vx)&&Number.isFinite(vy))setCursorViewportPos(el,vx,vy);
+  else setCursorPos(el, x, y);
 }
 function runClicks(t){
   const clicks = play.clicks;
@@ -2239,8 +2562,9 @@ function runClicks(t){
     const c = clicks[play.clickIdx++];
     const d = document.createElement('div');
     d.className = 'ripple';
-    d.style.left = (c.x * cr.width + cr.left - sr.left) + 'px';
-    d.style.top = (c.y * cr.height + cr.top - sr.top) + 'px';
+    const vr=viewer.getBoundingClientRect();
+    d.style.left = ((Number.isFinite(c.vx)?c.vx*vr.width+vr.left:c.x*cr.width+cr.left)-sr.left) + 'px';
+    d.style.top = ((Number.isFinite(c.vy)?c.vy*vr.height+vr.top:c.y*cr.height+cr.top)-sr.top) + 'px';
     stage.appendChild(d);
     setTimeout(() => d.remove(), 650);
   }
@@ -2850,6 +3174,7 @@ async function recordSpeech(){
     v: 4, app: 'LectureLite', created: new Date().toISOString(),
     duration: totalDur / 1000,
     viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+    appearance: getWorkspaceAppearance(),
     file: { name: source.name, mime: sourceMime(source.type) },
     files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
     fileSwitches,
@@ -3282,6 +3607,7 @@ async function generateSpeech(){
       v: 4, app: 'LectureLite', created: new Date().toISOString(),
       duration: tl.totalDurMs / 1000,
       viewport: { w: viewer.clientWidth, h: viewer.clientHeight },
+      appearance: getWorkspaceAppearance(),
       file: { name: source.name, mime: sourceMime(source.type) },
       files: files.map(f => ({ name: f.rel || f.name, mime: f.mime || sourceMime(f.type), type: f.type })),
       fileSwitches: tl.fileSwitches,
@@ -3521,16 +3847,31 @@ refreshMe();
 // One contextual instruction replaces guesswork around disabled controls.
 $('emptyImport').onclick = () => $('srcPick').click();
 $('emptyCourse').onclick = () => { setMode('play'); $('zipPick').click(); };
+// 主页中的网页草稿以 ?import=<id> 打开；不与公开讲解包 src 参数混用。
+const pendingWebImport = new URLSearchParams(location.search).get('import');
+if (pendingWebImport && !new URLSearchParams(location.search).get('src')) {
+  openWebImportDraft(pendingWebImport).catch(err => status('加载网页草稿失败：'+err.message, true));
+}
+const pendingLectureDraft = new URLSearchParams(location.search).get('draft');
+if (pendingLectureDraft && !new URLSearchParams(location.search).get('src')) {
+  status('正在恢复讲解草稿…');
+  fetchBlobWithProgress('/api/drafts/'+encodeURIComponent(pendingLectureDraft)+'/file','正在加载讲解草稿…')
+    .then(blob=>loadZip(new File([blob],'draft.lecture.zip',{type:'application/zip'}),{asDraft:true,draftId:pendingLectureDraft}))
+    .catch(err=>status('恢复讲解草稿失败：'+err.message,true));
+}
 let workflowText = '';
 function refreshWorkflow(){
   const busy = (recState && !recState.finished) || recordingScript || generatingSpeech || generatingScript;
+  const activelyRecording=!!(recState&&!recState.finished);
+  $('recBar').classList.toggle('is-recording',activelyRecording);
+  $('recBar').classList.toggle('is-ready',!!recState?.finished&&!busy);
+  $('recBar').classList.toggle('has-source',!!source);
   const text = busy ? ((generatingSpeech || generatingScript) ? '正在生成 · 请等待完成，随后可预览、下载或保存到主页。' : '正在录制 · 点击「停止」完成，再预览、下载或保存到主页。')
     : mode === 'play' ? (play ? '' : '打开讲解包 · 选择 lecture.zip，或从主页打开已保存的课程。')
     : recState?.finished ? '录制已完成 · 下载讲解包用于离线分发，或保存到主页后分享。'
     : source ? (source.type === 'html' ? 'HTML 演示 · 用演示内的目录、翻页按钮操作；开始录制后记录翻页与滚动。' : '文档已就绪 · 开始录制你的声音，或用 AI 生成讲稿。选中文字即可标注。')
     : '第 1 步 · 添加文档　→　第 2 步 · 录制讲解 / AI 生成　→　第 3 步 · 下载或保存';
-  if(text !== workflowText){ $('workflowHint').textContent = workflowText = text; }
-  $('workflowHint').classList.toggle('hidden', !text);
+  if(text !== workflowText){ $('headerHint').textContent = workflowText = text; }
   $('btnAutoScript').disabled = !source || !!busy;
   for(const id of ['btnExport','btnPreview','btnShare']) $(id).classList.toggle('hidden',!recState?.finished);
   for(const id of ['btnAutoScript','btnWriteScript']) $(id).classList.toggle('hidden',!source);
@@ -3541,6 +3882,12 @@ function refreshWorkflow(){
   $('scriptEdit').disabled = !!busy;
   $('scriptSave').disabled = !!busy || !scriptPanel.classList.contains('edit-mode');
   $('srcFileBtn').disabled = !!busy; $('srcDirBtn').disabled = !!busy;
+  $('btnSaveDraft').disabled = !source || generatingSpeech || generatingScript || recordingScript;
+  $('btnEditMarkdown').classList.toggle('hidden', !(mode === 'rec' && source?.type === 'md'));
+  $('btnEditMarkdown').disabled = !!busy;
+  $('interactionActionHost').classList.toggle('hidden', !(mode === 'rec' && source));
+  $('btnEditCaptionsRec').classList.toggle('hidden', !(mode === 'rec' && recState?.finished));
+  $('btnEditCaptionsPlay').classList.toggle('hidden', !(mode === 'play' && play));
   $('modeRec').setAttribute('aria-pressed',String(mode === 'rec'));
   $('modePlay').setAttribute('aria-pressed',String(mode === 'play'));
 }
@@ -3556,7 +3903,7 @@ interactionUI = window.LectureLiteInteractions?.create({
   stage,
   seek: $('seek'),
   playButton: $('btnPlay'),
-  authorActions: $('scriptPanel-actions'),
+  authorActions: $('interactionActionHost'),
   getPlaybackMs: () => currentPlaybackMs(),
   isPlaying: () => !!play?.active,
   pause: () => { if (play?.active) $('btnPlay').click(); },

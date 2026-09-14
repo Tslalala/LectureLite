@@ -20,6 +20,7 @@ body{ margin:0; background:
     radial-gradient(1200px 500px at 85% -10%, #eef1ea 0%, transparent 60%),
     var(--bg);
   color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; }
+body{isolation:isolate} body::before{content:"";position:fixed;inset:-24px;z-index:-1;background:var(--home-wallpaper,none) center/cover no-repeat;opacity:var(--home-wallpaper-opacity,0);filter:blur(var(--home-wallpaper-blur,0));transition:opacity .25s,filter .25s}
 
 /* ── 顶栏 ── */
 header{ display:flex; align-items:center; gap:14px; padding:16px 32px;
@@ -29,12 +30,14 @@ header{ display:flex; align-items:center; gap:14px; padding:16px 32px;
   color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700;
   box-shadow:var(--shadow-sm); }
 .brand{ display:flex; flex-direction:column; gap:1px; }
-.wordmark{ height:22px; width:auto; display:block; }
+.wordmark{ height:29px; width:auto; display:block; }
 .brand small{ font-size:11px; letter-spacing:.14em; color:var(--dim2); }
 header .spacer{ flex:1; }
-#who{ display:flex; align-items:center; gap:8px; color:var(--dim); font-size:13px; }
+#who{ display:flex; align-items:center; gap:8px; color:var(--dim); font:13px inherit;border:0;background:transparent;padding:5px 7px;border-radius:999px;cursor:pointer; }
+#who:hover{background:var(--surface2);color:var(--fg)}
 #who .avatar{ width:26px; height:26px; border-radius:50%; background:var(--acc-soft); color:var(--acc);
-  display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:700; }
+  display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:700;overflow:hidden }
+#who .avatar img{width:100%;height:100%;object-fit:cover}
 .btn{ padding:7px 15px; border:1px solid var(--line2); border-radius:9px; background:var(--surface);
   color:var(--fg); font-size:13px; cursor:pointer; text-decoration:none; transition:all .15s; }
 .btn:hover{ background:var(--surface2); border-color:#c9c9c2; }
@@ -47,6 +50,7 @@ main{ max-width:820px; margin:0 auto; padding:34px 24px 80px; }
 .sec-head h2{ margin:0; font-size:15.5px; font-weight:700; letter-spacing:-.01em; }
 .sec-head .count{ font-size:12px; color:var(--dim2); font-weight:600; }
 .sec-head .hint{ font-size:12px; color:var(--dim2); margin-left:auto; }
+.web-drafts{margin:0 0 26px;border:1px solid var(--line);border-radius:var(--radius);background:rgba(255,255,255,.72);box-shadow:var(--shadow-sm);overflow:hidden}.web-drafts summary{display:flex;align-items:center;gap:10px;padding:14px 17px;cursor:pointer;list-style:none}.web-drafts summary::-webkit-details-marker{display:none}.web-drafts summary::before{content:'›';color:var(--dim);transition:transform .18s}.web-drafts[open] summary::before{transform:rotate(90deg)}.web-drafts summary strong{font-size:14px}.web-drafts summary span{color:var(--dim);font-size:12px}.web-draft-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:0 17px 16px}.web-draft{min-width:0;display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:12px}.web-draft a{min-width:0;flex:1;text-decoration:none;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.web-draft small{color:var(--dim);white-space:nowrap}.web-draft button{border:0;background:none;color:var(--dim);cursor:pointer;padding:3px}.web-draft button:hover{color:var(--rec)}@media(max-width:680px){.web-draft-list{grid-template-columns:1fr}}
 
 /* ── 课程卡片 ── */
 ul.list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
@@ -140,21 +144,23 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
 .feedback-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}.feedback-head strong{flex:1}.feedback-body{overflow:auto;padding:18px}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}.metric{background:var(--surface2);border-radius:10px;padding:12px}.metric b{display:block;font-size:24px}.metric span{font-size:12px;color:var(--dim)}
 .insight-section{margin:18px 0}.insight-section h3{font-size:14px;margin:0 0 8px}.insight-row{padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}.insight-row small{display:block;color:var(--dim);margin-top:4px}.reply-box{display:flex;gap:7px;margin-top:7px}.reply-box textarea{flex:1;min-height:54px;border:1px solid var(--line2);border-radius:8px;padding:7px;font:12px/1.5 inherit}.reply-box button{align-self:flex-end}
 @media(max-width:680px){.metric-grid{grid-template-columns:1fr}.feedback-card{width:96vw;max-height:92vh}}
+.settings-card{width:min(720px,94vw)}.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.settings-section h3{margin:0 0 12px;font-size:14px}.field{display:block;margin:11px 0}.field span{display:block;color:var(--dim);font-size:12px;margin-bottom:5px}.field input{width:100%;padding:9px 11px;border:1px solid var(--line2);border-radius:8px;background:var(--surface2);font:inherit}.avatar-editor{display:flex;align-items:center;gap:12px}.avatar-preview{width:58px;height:58px;border-radius:50%;object-fit:cover;background:var(--surface2);border:1px solid var(--line)}.palette-list,.wallpaper-list{display:flex;gap:9px;flex-wrap:wrap}.palette{width:42px;height:30px;border-radius:8px;border:2px solid white;box-shadow:0 0 0 1px var(--line2);cursor:pointer}.palette.selected,.wallpaper.selected{box-shadow:0 0 0 2px var(--rec)}.wallpaper{width:92px;height:58px;border:2px solid white;border-radius:9px;background:center/cover;box-shadow:0 0 0 1px var(--line2);cursor:pointer}.settings-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:15px;border-top:1px solid var(--line)}.range-row{display:flex;align-items:center;gap:10px}.range-row input{flex:1}@media(max-width:680px){.settings-grid{grid-template-columns:1fr}.settings-card{height:100%;max-height:100%;width:100%;border-radius:0}}
 </style>
 <link rel="stylesheet" href="tools/home.css">
-<link rel="stylesheet" href="tools/ui-refine.css">
+<link rel="stylesheet" href="tools/ui-refine.css?v=20260908l">
 </head>
 <body>
 <script src="tools/ui-refine.js"></script>
 <header>
-  <div class="brand"><img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark"><small>个人课程库</small></div>
+  <div class="brand"><img src="docs/logo.png?v=20260906" alt="LectureLite" class="wordmark"></div>
   <span class="spacer"></span>
-  <span id="who"></span>
+  <button id="who" type="button" aria-label="账户与外观设置"></button>
   <a class="btn" href="/lecture-lite.html">新建讲解</a>
   <button id="logoutBtn" class="btn hidden">退出</button>
 </header>
 <main>
 <section class="library-intro"><div><p class="eyebrow">你的知识，值得被听见</p><h2>把讲解留在这里。</h2><p>整理自己的录制，继续上次的学习，也把理解分享给别人。</p></div><a class="btn create" href="/lecture-lite.html">＋ 新建讲解</a></section>
+<details id="webDrafts" class="web-drafts hidden"><summary><strong>草稿箱</strong><span id="draftSummary">30 天未编辑自动清理</span></summary><div id="webDraftList" class="web-draft-list"></div></details>
 <nav class="library-nav" aria-label="课程分类"><button data-view="mine">我的录制</button><button data-view="favs">收藏的课程</button><button data-view="shared">分享给我的</button><button data-view="trash">回收站</button></nav>
 <div class="library-filter"><input id="courseSearch" aria-label="搜索课程" type="search" placeholder="搜索课程名称或作者"><select id="courseSort" aria-label="排序"><option value="recent">最近更新</option><option value="title">名称顺序</option></select><span id="librarySummary" role="status"></span><button class="mini" id="reloadLibrary">刷新</button></div>
   <div class="sec-head"><h2>收藏的课程</h2><span class="count" id="cntFavs"></span><span class="hint">☆ 可在播放页随时收藏</span></div>
@@ -176,6 +182,7 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
 </main>
 <div id="status" role="status" aria-live="polite"></div>
 <div id="feedbackModal" class="feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle"><div class="feedback-card"><div class="feedback-head"><strong id="feedbackTitle">学习反馈</strong><button id="feedbackClose">×</button></div><div id="feedbackBody" class="feedback-body"></div></div></div>
+<div id="settingsModal" class="feedback-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle"><div class="feedback-card settings-card"><div class="feedback-head"><strong id="settingsTitle">账户与外观</strong><button id="settingsClose" aria-label="关闭">×</button></div><div class="feedback-body"><div class="settings-grid"><section class="settings-section"><h3>账户</h3><p id="forcePasswordNotice" class="sub0 hidden" style="color:var(--rec)">当前使用的是临时密码，请先设置新密码后继续使用。</p><div class="avatar-editor"><img id="avatarPreview" class="avatar-preview" alt="头像"><div><button id="avatarChoose" class="mini">更换头像</button><button id="avatarClear" class="mini">移除</button><input id="avatarFile" type="file" accept="image/*" hidden></div></div><label class="field"><span>UID</span><input id="profileUid" maxlength="64"></label><label class="field"><span>当前密码（修改 UID 或密码时必填）</span><input id="currentPassword" type="password" autocomplete="current-password"></label><label class="field"><span>新密码（留空则不修改）</span><input id="newPassword" type="password" autocomplete="new-password"></label><label class="field"><span>确认新密码</span><input id="confirmPassword" type="password" autocomplete="new-password"></label></section><section class="settings-section"><h3>外观</h3><span class="field"><span>主题配色</span><div id="paletteList" class="palette-list"></div></span><span class="field"><span>主页与录制区背景</span><div id="wallpaperList" class="wallpaper-list"></div></span><label class="field"><span>背景图可见度 <b id="wallpaperOpacityText">18%</b></span><div class="range-row"><input id="wallpaperOpacity" type="range" min="0" max="55" value="18"></div></label><label class="field"><span>背景模糊 <b id="wallpaperBlurText">6px</b></span><div class="range-row"><input id="wallpaperBlur" type="range" min="0" max="24" value="6"></div></label><p class="sub0">录制时会把当前背景外观写入课程包，播放时自动还原。</p></section></div><div class="settings-actions"><a id="adminEntry" class="btn hidden" href="/admin.html" style="margin-right:auto">管理后台</a><button id="settingsCancel" class="btn">取消</button><button id="settingsSave" class="btn create">保存设置</button></div></div></div></div>
 
 <div id="authGate">
   <div class="card">
@@ -196,7 +203,7 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
 
 <script>
 const $ = id => document.getElementById(id);
-let me = null;
+let me = null, profile = null, pendingAvatar = null;
 function apiJSON(url, opts){
   return fetch(url, opts).then(async res => {
     const data = await res.json().catch(() => ({}));
@@ -211,6 +218,22 @@ function status(msg){
   clearTimeout(statusTimer);
   statusTimer = setTimeout(() => el.classList.remove('show'), 2600);
 }
+const palettes={paper:{bg:'#FAFAF8',surface:'#fff',surface2:'#F4F4F1',fg:'#1a1a1a',dim:'#6B6B67',acc:'#1a1a1a',rec:'#b54038'},sage:{bg:'#f4f6f1',surface:'#fff',surface2:'#edf1e9',fg:'#1d241e',dim:'#697168',acc:'#536b57',rec:'#a64038'},ocean:{bg:'#f3f6f8',surface:'#fff',surface2:'#eaf0f4',fg:'#182229',dim:'#66737b',acc:'#315f78',rec:'#a7433c'},rose:{bg:'#faf5f4',surface:'#fff',surface2:'#f5ecea',fg:'#251c1b',dim:'#756664',acc:'#7b5350',rec:'#ad3f38'}};
+const wallpapers={none:'',floral:'docs/wallpapers/floral.png',peach:'docs/wallpapers/peach.png',cherry:'docs/wallpapers/cherry.png',blue:'docs/wallpapers/4.png',daisy:'docs/wallpapers/5.png',mountain:'docs/wallpapers/6.png',terracotta:'docs/wallpapers/7.png',sage:'docs/wallpapers/8.png',clay:'docs/wallpapers/9.png'};
+let appearance={palette:'paper',wallpaper:'none',opacity:18,blur:6};
+function loadAppearance(){try{appearance={...appearance,...JSON.parse(localStorage.getItem('llHomeAppearance')||'{}')}}catch(e){} applyAppearance()}
+function applyAppearance(){const p=palettes[appearance.palette]||palettes.paper;for(const [k,v] of Object.entries(p))document.documentElement.style.setProperty('--'+k,v);const src=wallpapers[appearance.wallpaper]||'';document.documentElement.style.setProperty('--home-wallpaper',src?`url("${src}")`:'none');document.documentElement.style.setProperty('--home-wallpaper-opacity',String((Number(appearance.opacity)||0)/100));document.documentElement.style.setProperty('--home-wallpaper-blur',(Number(appearance.blur)||0)+'px');}
+function renderProfile(){const w=$('who');w.replaceChildren();const av=el('span','avatar');if(profile&&profile.avatar){const img=document.createElement('img');img.src=profile.avatar;img.alt='';av.appendChild(img)}else av.textContent=(me||'?').slice(0,1).toUpperCase();w.append(av,el('span',null,me||''));$('adminEntry').classList.toggle('hidden',!profile?.is_admin);$('forcePasswordNotice').classList.toggle('hidden',!profile?.password_change_required);}
+function openSettings(){pendingAvatar=profile?.avatar||'';$('profileUid').value=me||'';$('currentPassword').value='';$('newPassword').value='';$('confirmPassword').value='';updateAvatarPreview();$('paletteList').replaceChildren();for(const [key,p] of Object.entries(palettes)){const b=el('button','palette'+(key===appearance.palette?' selected':''));b.type='button';b.style.background=`linear-gradient(90deg,${p.rec} 0 35%,${p.acc} 35% 65%,${p.bg} 65%)`;b.title=({paper:'经典米白',sage:'鼠尾草绿',ocean:'雾蓝',rose:'柔粉'}[key]);b.onclick=()=>{appearance.palette=key;applyAppearance();document.querySelectorAll('.palette').forEach(x=>x.classList.toggle('selected',x===b))};$('paletteList').appendChild(b)}$('wallpaperList').replaceChildren();const wallpaperLabels={none:'无背景图',floral:'花野',peach:'暖桃',cherry:'樱色山水',blue:'蓝叶',daisy:'金色雏菊',mountain:'蓝色山景',terracotta:'暖色山谷',sage:'鼠尾草',clay:'陶土叶影'};for(const [key,src] of Object.entries(wallpapers)){const b=el('button','wallpaper'+(key===appearance.wallpaper?' selected':''));b.type='button';b.style.backgroundImage=src?`url(${src})`:'linear-gradient(135deg,#fafaf8,#eee)';b.title=wallpaperLabels[key]||key;b.setAttribute('aria-label',b.title);b.onclick=()=>{appearance.wallpaper=key;applyAppearance();document.querySelectorAll('.wallpaper').forEach(x=>x.classList.toggle('selected',x===b))};$('wallpaperList').appendChild(b)}$('wallpaperOpacity').value=appearance.opacity;$('wallpaperOpacityText').textContent=appearance.opacity+'%';$('wallpaperBlur').value=appearance.blur;$('wallpaperBlurText').textContent=appearance.blur+'px';$('settingsModal').classList.add('show');document.body.style.overflow='hidden'}
+function closeSettings(){ $('settingsModal').classList.remove('show');document.body.style.overflow=''; }
+function updateAvatarPreview(){const p=$('avatarPreview');if(pendingAvatar){p.src=pendingAvatar}else{const letter=(me||'?').slice(0,1).toUpperCase();p.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" fill="#f0f0ec"/><text x="80" y="98" text-anchor="middle" font-family="Arial" font-size="62" font-weight="700" fill="#b54038">${letter.replace(/[<>&]/g,'')}</text></svg>`);p.alt='默认头像'}}
+$('who').onclick=openSettings;$('settingsClose').onclick=$('settingsCancel').onclick=closeSettings;$('settingsModal').onclick=e=>{if(e.target===$('settingsModal'))closeSettings()};
+$('avatarChoose').onclick=()=>$('avatarFile').click();$('avatarClear').onclick=()=>{pendingAvatar='';updateAvatarPreview()};
+$('avatarFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const img=new Image(),u=URL.createObjectURL(f);img.onload=()=>{const c=document.createElement('canvas');c.width=c.height=160;const x=c.getContext('2d'),s=Math.min(img.width,img.height),sx=(img.width-s)/2,sy=(img.height-s)/2;x.drawImage(img,sx,sy,s,s,0,0,160,160);pendingAvatar=c.toDataURL('image/jpeg',.82);URL.revokeObjectURL(u);updateAvatarPreview()};img.src=u};
+$('wallpaperOpacity').oninput=e=>{appearance.opacity=Number(e.target.value);$('wallpaperOpacityText').textContent=appearance.opacity+'%';applyAppearance()};
+$('wallpaperBlur').oninput=e=>{appearance.blur=Number(e.target.value);$('wallpaperBlurText').textContent=appearance.blur+'px';applyAppearance()};
+$('settingsSave').onclick=async()=>{const np=$('newPassword').value;if(profile?.password_change_required&&!np)return status('当前使用临时密码，请先设置新密码');if(np!==$('confirmPassword').value)return status('两次输入的新密码不一致');const b=$('settingsSave');b.disabled=true;try{profile=await apiJSON('/api/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid:$('profileUid').value.trim(),current_password:$('currentPassword').value,new_password:np,avatar:pendingAvatar})});me=profile.uid;localStorage.setItem('llHomeAppearance',JSON.stringify(appearance));renderProfile();closeSettings();status('账户与外观设置已保存')}catch(e){status('保存失败：'+e.message)}finally{b.disabled=false}};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('settingsModal').classList.contains('show'))closeSettings()});loadAppearance();
 function fmtMs(ms){
   if (!ms || ms < 0) return '';
   const s = Math.floor(ms / 1000);
@@ -388,7 +411,8 @@ function renderItem(it, opts){
     const sb = el('button', 'mini', '分享给');
     sb.addEventListener('click', () => shareTo(it, inp));
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') shareTo(it, inp); });
-    sub.appendChild(inp); sub.appendChild(sb);
+    const memberShare = el('div', 'member-share');
+    memberShare.appendChild(inp); memberShare.appendChild(sb); sub.appendChild(memberShare);
     const lb = el('button', 'mini', '生成分享链接');
     const expiry = el('select','mini'); expiry.setAttribute('aria-label','分享链接有效期');
     for(const [value,label] of [['7','7 天有效'],['1','1 天有效'],['30','30 天有效'],['0','长期有效']]){const option=el('option',null,label);option.value=value;expiry.appendChild(option);}
@@ -451,12 +475,25 @@ async function render(){
     if (String(err.message).includes('未登录') || String(err.message).includes('401')){ showAuth(true); return; }
     status('获取主页失败：' + err.message); return;
   }
-  $('who').innerHTML = '';
-  const av = el('span', 'avatar', (me || '?').slice(0, 1).toUpperCase());
-  $('who').appendChild(av);
-  $('who').appendChild(el('span', null, me));
+  renderProfile();
   $('logoutBtn').classList.toggle('hidden', !me);
   drawLibrary();
+  loadWebDrafts();
+}
+async function loadWebDrafts(){
+  try{
+    const data=await apiJSON('/api/drafts');
+    const list=$('webDraftList'); list.replaceChildren();
+    for(const draft of data.items||[]){
+      const row=document.createElement('div');row.className='web-draft';
+      const link=document.createElement('a');link.href='/lecture-lite.html?'+(draft.kind==='web'?'import=':'draft=')+encodeURIComponent(draft.id);link.title=draft.url||draft.title||'';link.textContent=(draft.kind==='web'?'网页 · ':'讲解 · ')+(draft.title||'未命名草稿');
+      const days=Math.max(0,30-Math.floor((Date.now()/1000-(draft.updated||draft.created||0))/86400));const meta=document.createElement('small');meta.textContent=days+' 天';meta.title='距离自动清理约 '+days+' 天';
+      const del=document.createElement('button');del.textContent='×';del.title='删除草稿';del.onclick=async()=>{if(!await LectureUI.confirm('删除“'+(draft.title||'未命名草稿')+'”？草稿删除后无法恢复。',{title:'删除草稿？',confirmText:'删除',danger:true}))return;try{await apiJSON('/api/drafts/'+encodeURIComponent(draft.id)+'/delete',{method:'POST'});status('草稿已删除');loadWebDrafts()}catch(e){status('删除失败：'+e.message)}};
+      row.append(link,meta,del);list.appendChild(row);
+    }
+    $('draftSummary').textContent=(data.items||[]).length+' 个草稿 · 30 天未编辑自动清理';
+    $('webDrafts').classList.toggle('hidden',!(data.items||[]).length);
+  }catch(err){ $('webDrafts').classList.add('hidden'); }
 }
 function drawLibrary(){
   const data = library; if (!data) return;
@@ -489,22 +526,23 @@ $('authForm').addEventListener('submit', async e => {
       body: JSON.stringify({ uid: $('authUid').value.trim(), password: $('authPwd').value }),
     });
     me = data.uid;
+    profile = await apiJSON('/api/me');
     showAuth(false);
-    render();
+    render(); if(profile.password_change_required)openSettings();
   } catch(err){ $('authErr').textContent = err.message; }
 });
 $('logoutBtn').addEventListener('click', async () => {
   try { await apiJSON('/api/logout', { method: 'POST' }); } catch(e){}
-  me = null; library = null;
+  me = null; profile = null; library = null;
   for (const id of ['secMine','secFavs','secShared','secTrash']) $(id).replaceChildren();
   showAuth(true);
   $('who').textContent = '';
   $('logoutBtn').classList.add('hidden');
 });
 (async function init(){
-  try { me = (await apiJSON('/api/me')).uid; }
+  try { profile = await apiJSON('/api/me'); me = profile.uid; }
   catch(e){ me = null; showAuth(true); return; }
-  render();
+  render(); if(profile.password_change_required)openSettings();
 })();
 </script>
 </body>

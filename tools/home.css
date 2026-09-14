@@ -35,5 +35,5 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* LectureLite wordmark: image logo, no icon */
-header .wordmark{height:22px}
+header .wordmark{height:29px}
 .brand small{margin-top:3px}
