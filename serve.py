@@ -476,13 +476,18 @@ def get_lan_ip():
 
 
 def _cleanup_expired_shares():
-    """启动时清掉过期分享文件。"""
+    """启动时清理孤儿文件：只删未被任何录制引用的遗留文件。
+
+    录制文件由 recordings 长期持有，不能按时间清理（曾按 7 天 mtime
+    全删，导致用户录制文件丢失）；仅清理无归属的临时残留。
+    """
     if not SHARED_DIR.is_dir():
         return
-    now = time.time()
-    for p in SHARED_DIR.iterdir():
+    referenced = {SHARED_DIR / (r.get("stored") or "").split("/")[-1]
+                  for r in _db["recordings"].values() if r.get("stored")}
+    for p in list(SHARED_DIR.iterdir()):
         try:
-            if p.is_file() and now - p.stat().st_mtime > SHARE_KEEP_SECONDS:
+            if p.is_file() and p.name not in {x.name for x in referenced}:
                 p.unlink()
         except OSError:
             pass
@@ -2472,9 +2477,9 @@ def main():
         print(f"找不到 lecture-lite.html — serve.py 必须和它放在同一目录")
         sys.exit(1)
 
-    _cleanup_expired_shares()
     _load_store()
     _seed_demo_courses()
+    _cleanup_expired_shares()
     _purge_expired_trash()
     _purge_expired_drafts()
     threading.Thread(target=_purge_loop, daemon=True).start()
